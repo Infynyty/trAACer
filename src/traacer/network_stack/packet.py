@@ -1,9 +1,11 @@
 from dataclasses import dataclass
 
+import numpy as np
+
 
 @dataclass(frozen=True, slots=True)
 class Packet:
-    bytes: bytes
+    bytes: np.ndarray
 
 class PayloadLayerPacket(Packet):
     pass
