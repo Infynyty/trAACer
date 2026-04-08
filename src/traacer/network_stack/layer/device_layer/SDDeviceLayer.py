@@ -1,5 +1,6 @@
-from traacer.network_stack.packet import PhysicalLayerPacket
 import sounddevice as sd
+
+from traacer.network_stack.packet import PhysicalLayerPacket
 
 
 class SDDeviceLayerSender:
@@ -8,5 +9,5 @@ class SDDeviceLayerSender:
         self.sample_rate = sample_rate
 
     def send_down(self, packet: PhysicalLayerPacket):
-        sd.play(packet.bytes, samplerate=self.sample_rate)
+        sd.play(packet.data, samplerate=self.sample_rate)
         sd.wait()

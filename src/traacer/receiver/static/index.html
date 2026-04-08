@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AAC Recorder</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 700px;
+      margin: 40px auto;
+      padding: 0 16px;
+    }
+    .box {
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      padding: 16px;
+    }
+    .status {
+      font-weight: bold;
+      margin-bottom: 12px;
+    }
+    button {
+      padding: 10px 14px;
+      margin-right: 8px;
+    }
+    pre {
+      background: #f5f5f5;
+      padding: 12px;
+      border-radius: 6px;
+      overflow-x: auto;
+    }
+  </style>
+</head>
+<body>
+  <h1>AAC Recorder</h1>
+
+  <div class="box">
+    <div class="status" id="status">Loading...</div>
+    <button id="manualStart">Manual start</button>
+    <pre id="log"></pre>
+  </div>
+
+  <script>
+  let mediaRecorder = null
+  let chunks = []
+  let pollHandle = null
+  let isRecording = false
+
+  const statusEl = document.getElementById("status")
+  const logEl = document.getElementById("log")
+  const manualStartBtn = document.getElementById("manualStart")
+
+  function log(message) {
+    const line = `[${new Date().toLocaleTimeString()}] ${message}`
+    logEl.textContent += line + "\n"
+    logEl.scrollTop = logEl.scrollHeight
+    console.log(message)
+  }
+
+  function setStatus(message) {
+    statusEl.textContent = message
+  }
+
+  async function fetchJson(url, options = {}) {
+    const response = await fetch(url, options)
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`)
+    }
+    return response.json()
+  }
+
+  async function waitUntilServerIsWaiting() {
+    const status = await fetchJson("/api/status")
+    log(`Server status: ${JSON.stringify(status)}`)
+
+    if (!status.waiting_for_device) {
+      setStatus("Server is not waiting for a device")
+      return false
+    }
+
+    setStatus("Server is waiting for microphone permission")
+    return true
+  }
+
+  async function sendReadySignal() {
+    const readyResult = await fetchJson("/api/device-ready", {
+      method: "POST"
+    })
+
+    if (!readyResult.ok) {
+      setStatus("Server rejected ready signal")
+      log(readyResult.message)
+      return false
+    }
+
+    setStatus("Ready acknowledged by server")
+    log("Sent ready signal to server")
+    return true
+  }
+
+  async function startRecording() {
+    if (isRecording) {
+      return
+    }
+
+    const waiting = await waitUntilServerIsWaiting()
+    if (!waiting) {
+      return
+    }
+
+    setStatus("Waiting for microphone permission...")
+    log("Requesting microphone permission")
+
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+
+    log("Microphone permission granted")
+
+    const ready = await sendReadySignal()
+    if (!ready) {
+      stream.getTracks().forEach(track => track.stop())
+      return
+    }
+
+    chunks = []
+    mediaRecorder = new MediaRecorder(stream)
+
+    mediaRecorder.ondataavailable = event => {
+      if (event.data && event.data.size > 0) {
+        chunks.push(event.data)
+      }
+    }
+
+    mediaRecorder.onstop = async () => {
+      setStatus("Recording stopped, uploading...")
+      log("Recording stopped")
+
+      const blob = new Blob(chunks, { type: mediaRecorder.mimeType || "audio/webm" })
+      const formData = new FormData()
+      formData.append("file", blob, "recording.webm")
+
+      try {
+        const response = await fetch("/api/upload-recording", {
+          method: "POST",
+          body: formData
+        })
+
+        if (!response.ok) {
+          throw new Error(`Upload failed with ${response.status}`)
+        }
+
+        const result = await response.json()
+        setStatus("Upload complete")
+        log(`Upload complete: ${JSON.stringify(result)}`)
+      } catch (error) {
+        setStatus("Upload failed")
+        log(`Upload failed: ${error.message}`)
+      }
+
+      if (pollHandle) {
+        clearInterval(pollHandle)
+        pollHandle = null
+      }
+
+      stream.getTracks().forEach(track => track.stop())
+      isRecording = false
+    }
+
+    mediaRecorder.start()
+    isRecording = true
+    setStatus("Recording...")
+    log("Recording started")
+
+    pollHandle = setInterval(checkStopFlag, 1000)
+  }
+
+  async function checkStopFlag() {
+    try {
+      const result = await fetchJson("/api/should-stop")
+      if (result.stop_requested && mediaRecorder && isRecording) {
+        log("Stop requested by server")
+        mediaRecorder.stop()
+      }
+    } catch (error) {
+      log(`Polling failed: ${error.message}`)
+    }
+  }
+
+  async function init() {
+    setStatus("Ready")
+    log("Page loaded")
+  }
+
+  manualStartBtn.addEventListener("click", async () => {
+    try {
+      await startRecording()
+    } catch (error) {
+      setStatus("Microphone access failed")
+      log(`Manual start failed: ${error.message}`)
+    }
+  })
+
+  init()
+</script>
+</body>
+</html>

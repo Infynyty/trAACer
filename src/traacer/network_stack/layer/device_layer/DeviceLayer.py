@@ -8,5 +8,5 @@ class DeviceLayerSender(Protocol):
         pass
 
 class DeviceLayerReceiver(Protocol):
-    def send_up(self, packet: PhysicalLayerPacket):
+    def send_up(self):
         pass

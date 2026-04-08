@@ -5,7 +5,7 @@ import numpy as np
 
 @dataclass(frozen=True, slots=True)
 class Packet:
-    bytes: np.ndarray
+    data: np.ndarray
 
 class PayloadLayerPacket(Packet):
     pass
