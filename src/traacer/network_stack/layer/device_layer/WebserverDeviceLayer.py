@@ -9,14 +9,16 @@ from traacer.network_stack.layer.device_layer.SDDeviceLayer import SDDeviceLayer
 from traacer.network_stack.layer.device_layer.WAVDeviceLayer import WAVDeviceLayerSender
 from traacer.network_stack.layer.physical_layer.PhysicalLayer import PhysicalLayerReceiver
 from traacer.network_stack.packet import PhysicalLayerPacket, DeviceLayerPacket
+from traacer.receiver.server import cert_path
 
 
 class WebserverDeviceLayerSender:
 
-    def __init__(self, server_url: str = "http://127.0.0.1:8000"):
+    def __init__(self, server_url: str = "https://127.0.0.1:8000"):
         self.server_url = server_url
-        self.sd_sender = SDDeviceLayerSender(16000)
+        self.sd_sender = SDDeviceLayerSender(44100)
         self.session = requests.Session()
+        self.session.verify = cert_path
 
     def _url(self, path: str) -> str:
         return f"{self.server_url}{path}"
@@ -56,7 +58,7 @@ class WebserverDeviceLayerSender:
     def start(self):
         response = self._poll_until(
             lambda: self._try_start_waiting(),
-            timeout_s=30.0,
+            timeout_s=60.0,
             interval_s=0.25,
         )
         response.raise_for_status()
@@ -109,7 +111,7 @@ class WebserverDeviceLayerReceiver:
     def _load_audio_as_float32(
         self,
         path: Path,
-        target_sample_rate: int = 16000,
+        target_sample_rate: int = 44100,
     ) -> np.ndarray:
         container = av.open(str(path))
         stream = next(s for s in container.streams if s.type == "audio")

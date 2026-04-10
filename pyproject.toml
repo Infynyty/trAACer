@@ -11,5 +11,6 @@ dependencies = [
     "fastapi",
     "uvicorn",
     "python-multipart",
-    "av"
+    "av",
+    "cryptography"
 ]
