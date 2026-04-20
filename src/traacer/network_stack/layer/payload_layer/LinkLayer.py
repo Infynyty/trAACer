@@ -18,4 +18,5 @@ class NoopLinkLayerReceiver:
         self.packets = []
 
     def send_up(self, packet: PhysicalLayerPacket):
+        print("Decoded Data: " + packet.data.tobytes().decode("utf-8", errors="replace"))
         self.packets.append(packet)

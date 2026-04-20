@@ -5,7 +5,7 @@ from traacer.network_stack.layer.device_layer.DeviceLayer import DeviceLayerSend
 from traacer.network_stack.layer.payload_layer.LinkLayer import LinkLayerReceiver
 from traacer.network_stack.layer.physical_layer.PhysicalLayerUtil import bytes_to_bits, manchester_encode, \
     manchester_decode, bits_to_bytes
-from traacer.network_stack.layer.physical_layer.Synchronization import create_chirp_preamble, find_preamble_start
+from traacer.network_stack.layer.physical_layer.Synchronization import create_zadoff_chu_preamble, find_preamble_start
 from traacer.network_stack.packet import LinkLayerPacket, PhysicalLayerPacket, DeviceLayerPacket
 
 import matplotlib.pyplot as plt
@@ -80,7 +80,7 @@ class OOKPhysicalLayerSender:
         plot_signal_with_signal_boundaries(signal, symbol_length=int(self.sample_rate*self.bit_duration), xlim=50000)
         q.put(signal)
 
-        signal = np.concat([create_chirp_preamble(), signal])
+        signal = np.concat([create_zadoff_chu_preamble(), signal])
 
         self.device_layer_sender.send_down(PhysicalLayerPacket(signal))
 
@@ -149,7 +149,7 @@ class OOKPhysicalLayerReceiver:
 
     def send_up(self, packet: DeviceLayerPacket):
         signal = np.asarray(packet.data, dtype=np.float32)
-        preamble = create_chirp_preamble()
+        preamble = create_zadoff_chu_preamble()
         signal_start_index = find_preamble_start(signal, preamble) + len(preamble)
         signal = signal[signal_start_index:]
 

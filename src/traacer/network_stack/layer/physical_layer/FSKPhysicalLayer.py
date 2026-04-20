@@ -5,6 +5,7 @@ from traacer.network_stack.layer.device_layer.DeviceLayer import DeviceLayerSend
 from traacer.network_stack.layer.payload_layer.LinkLayer import LinkLayerReceiver
 from traacer.network_stack.layer.physical_layer.PhysicalLayerUtil import manchester_decode, bits_to_bytes, \
     bytes_to_bits, manchester_encode
+from traacer.network_stack.layer.physical_layer.Synchronization import create_zadoff_chu_preamble, find_preamble_start
 from traacer.network_stack.packet import LinkLayerPacket, PhysicalLayerPacket, DeviceLayerPacket
 
 import matplotlib.pyplot as plt
@@ -78,6 +79,7 @@ class FSKPhysicalLayerSender:
 
         symbols = [one_symbol if bit else zero_symbol for bit in bits]
         signal = np.concatenate(symbols).astype(np.float32)
+        signal = np.concat([create_zadoff_chu_preamble(), signal])
 
         q.put(signal)
         self.device_layer_sender.send_down(PhysicalLayerPacket(signal))
@@ -141,6 +143,9 @@ class FSKPhysicalLayerReceiver:
 
     def send_up(self, packet: DeviceLayerPacket):
         signal = np.asarray(packet.data, dtype=np.float32)
+        preamble = create_zadoff_chu_preamble()
+        signal_start_index = find_preamble_start(signal, preamble) + len(preamble)
+        signal = signal[signal_start_index:]
 
         detected_bits = self._detect_bits(signal)
 

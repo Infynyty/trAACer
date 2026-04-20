@@ -2,7 +2,7 @@ import queue
 
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.stats import alpha
+from scipy import signal as sg
 
 
 def plot_signal(signal: np.ndarray):
@@ -58,6 +58,13 @@ def plot_fft(signal: np.ndarray):
     plt.xlim(0, 5000)
     plt.show()
 
+def plot_spectrogram(signal: np.ndarray, frequency):
+    f, t, Sxx = sg.spectrogram(signal, fs=44100)
+    plt.pcolormesh(t, f, 10 * np.log10(Sxx), shading='gouraud')
+    plt.ylabel('Frequency [Hz]')
+    plt.xlabel('Time [s]')
+    plt.colorbar(label='Power [dB]')
+    plt.show()
 
 q = queue.Queue()
 
