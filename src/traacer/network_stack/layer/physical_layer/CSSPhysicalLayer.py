@@ -21,7 +21,7 @@ class CSSPhysicalLayerSender:
             dtype=np.uint8,
         )
 
-        signal = css_modulate(signal, 44100, 500, 10000, 0.2, 2)
+        signal = css_modulate(signal, 44100, 500, 10000, 0.1, 2)
 
         signal =np.concat([np.tile(create_chirp_preamble(start_frequency=500, end_frequency=16000, duration_in_sec=0.02), 4), np.tile(create_chirp_preamble(start_frequency=16000, end_frequency=500, duration_in_sec=0.02), 4), np.zeros(10000), signal])
 
@@ -35,5 +35,5 @@ class CSSPhysicalLayerReceiver:
         signal_start_index = find_preamble_start(signal, preamble) + len(preamble) + 10000
         signal = signal[signal_start_index:]
 
-        data = css_demodulate(signal, 44100, 500, 10000, 0.2, 2)
+        data = css_demodulate(signal, 44100, 500, 10000, 0.1, 2)
         print(data)

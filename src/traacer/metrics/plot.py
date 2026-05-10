@@ -55,7 +55,7 @@ def plot_fft(signal: np.ndarray):
     plt.xlabel("Frequency (Hz)")
     plt.ylabel("Magnitude")
     plt.title("FFT with Hann Window")
-    plt.xlim(0, 5000)
+    plt.xlim(0, 20000)
     plt.show()
 
 def plot_spectrogram(signal: np.ndarray, frequency):
@@ -73,3 +73,15 @@ def wait_for_signals():
     signal2 = q.get()
 
     compare_signals(signal1, signal2, 8200)
+
+def plot_constellation(symbols, title):
+    plt.figure()
+    plt.scatter(np.real(symbols), np.imag(symbols), s=10)
+    plt.axhline(0)
+    plt.axvline(0)
+    plt.grid(True)
+    plt.title(title)
+    plt.xlabel("Real")
+    plt.ylabel("Imag")
+    plt.axis("equal")
+    plt.show()
