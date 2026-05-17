@@ -11,24 +11,29 @@
       margin: 40px auto;
       padding: 0 16px;
     }
+
     .box {
       border: 1px solid #ccc;
       border-radius: 8px;
       padding: 16px;
     }
+
     .status {
       font-weight: bold;
       margin-bottom: 12px;
     }
+
     button {
       padding: 10px 14px;
       margin-right: 8px;
     }
+
     pre {
       background: #f5f5f5;
       padding: 12px;
       border-radius: 6px;
       overflow-x: auto;
+      min-height: 220px;
     }
   </style>
 </head>
@@ -38,123 +43,162 @@
   <div class="box">
     <div class="status" id="status">Loading...</div>
     <button id="manualStart">Manual start</button>
+    <button id="manualStop">Manual stop</button>
     <pre id="log"></pre>
   </div>
 
   <script>
-  let mediaRecorder = null
-  let chunks = []
-  let pollHandle = null
-  let isRecording = false
+    let audioContext = null
+    let processor = null
+    let source = null
+    let socket = null
+    let pollHandle = null
+    let mediaStream = null
+    let muteGain = null
+    let isRecording = false
 
-  const statusEl = document.getElementById("status")
-  const logEl = document.getElementById("log")
-  const manualStartBtn = document.getElementById("manualStart")
+    const statusEl = document.getElementById("status")
+    const logEl = document.getElementById("log")
+    const manualStartBtn = document.getElementById("manualStart")
+    const manualStopBtn = document.getElementById("manualStop")
 
-  function log(message) {
-    const line = `[${new Date().toLocaleTimeString()}] ${message}`
-    logEl.textContent += line + "\n"
-    logEl.scrollTop = logEl.scrollHeight
-    console.log(message)
-  }
-
-  function setStatus(message) {
-    statusEl.textContent = message
-  }
-
-  async function fetchJson(url, options = {}) {
-    const response = await fetch(url, options)
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
-    }
-    return response.json()
-  }
-
-  async function waitUntilServerIsWaiting() {
-    const status = await fetchJson("/api/status")
-    log(`Server status: ${JSON.stringify(status)}`)
-
-    if (!status.waiting_for_device) {
-      setStatus("Server is not waiting for a device")
-      return false
+    function log(message) {
+      const line = `[${new Date().toLocaleTimeString()}] ${message}`
+      logEl.textContent += line + "\n"
+      logEl.scrollTop = logEl.scrollHeight
+      console.log(message)
     }
 
-    setStatus("Server is waiting for microphone permission")
-    return true
-  }
-
-  async function sendReadySignal() {
-    const readyResult = await fetchJson("/api/device-ready", {
-      method: "POST"
-    })
-
-    if (!readyResult.ok) {
-      setStatus("Server rejected ready signal")
-      log(readyResult.message)
-      return false
+    function setStatus(message) {
+      statusEl.textContent = message
     }
 
-    setStatus("Ready acknowledged by server")
-    log("Sent ready signal to server")
-    return true
-  }
-
-  async function startRecording() {
-    if (isRecording) {
-      return
-    }
-
-    const waiting = await waitUntilServerIsWaiting()
-    if (!waiting) {
-      return
-    }
-
-    setStatus("Waiting for microphone permission...")
-    log("Requesting microphone permission")
-
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-
-    log("Microphone permission granted")
-
-    const ready = await sendReadySignal()
-    if (!ready) {
-      stream.getTracks().forEach(track => track.stop())
-      return
-    }
-
-    chunks = []
-    mediaRecorder = new MediaRecorder(stream)
-
-    mediaRecorder.ondataavailable = event => {
-      if (event.data && event.data.size > 0) {
-        chunks.push(event.data)
+    async function fetchJson(url, options = {}) {
+      const response = await fetch(url, options)
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`)
       }
+      return response.json()
     }
 
-    mediaRecorder.onstop = async () => {
-      setStatus("Recording stopped, uploading...")
-      log("Recording stopped")
+    function websocketUrl(path) {
+      const protocol = window.location.protocol === "https:" ? "wss:" : "ws:"
+      return `${protocol}//${window.location.host}${path}`
+    }
 
-      const blob = new Blob(chunks, { type: mediaRecorder.mimeType || "audio/webm" })
-      const formData = new FormData()
-      formData.append("file", blob, "recording.webm")
+    async function waitUntilServerIsWaiting() {
+      const status = await fetchJson("/api/status")
+      log(`Server status: ${JSON.stringify(status)}`)
 
-      try {
-        const response = await fetch("/api/upload-recording", {
-          method: "POST",
-          body: formData
-        })
+      if (!status.waiting_for_device) {
+        setStatus("Server is not waiting for a device")
+        return false
+      }
 
-        if (!response.ok) {
-          throw new Error(`Upload failed with ${response.status}`)
+      setStatus("Server is waiting for microphone permission")
+      return true
+    }
+
+    async function sendReadySignal() {
+      const readyResult = await fetchJson("/api/device-ready", {
+        method: "POST"
+      })
+
+      if (!readyResult.ok) {
+        setStatus("Server rejected ready signal")
+        log(readyResult.message)
+        return false
+      }
+
+      setStatus("Ready acknowledged by server")
+      log("Sent ready signal to server")
+      return true
+    }
+
+    async function openPcmSocket(sampleRate) {
+      return new Promise((resolve, reject) => {
+        const ws = new WebSocket(websocketUrl("/api/pcm-upload"))
+        ws.binaryType = "arraybuffer"
+
+        ws.onopen = () => {
+          ws.send(JSON.stringify({ sample_rate: sampleRate }))
+          resolve(ws)
         }
 
-        const result = await response.json()
-        setStatus("Upload complete")
-        log(`Upload complete: ${JSON.stringify(result)}`)
-      } catch (error) {
-        setStatus("Upload failed")
-        log(`Upload failed: ${error.message}`)
+        ws.onerror = () => {
+          reject(new Error("WebSocket connection failed"))
+        }
+
+        ws.onclose = event => {
+          log(`WebSocket closed: ${event.code}`)
+        }
+      })
+    }
+
+    async function startRecording() {
+      if (isRecording) {
+        return
+      }
+
+      const waiting = await waitUntilServerIsWaiting()
+      if (!waiting) {
+        return
+      }
+
+      setStatus("Waiting for microphone permission...")
+      log("Requesting microphone permission")
+
+      mediaStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+          channelCount: 1
+        }
+      })
+
+      log("Microphone permission granted")
+
+      const ready = await sendReadySignal()
+      if (!ready) {
+        mediaStream.getTracks().forEach(track => track.stop())
+        mediaStream = null
+        return
+      }
+
+      audioContext = new AudioContext()
+      socket = await openPcmSocket(audioContext.sampleRate)
+
+      source = audioContext.createMediaStreamSource(mediaStream)
+      processor = audioContext.createScriptProcessor(4096, 1, 1)
+      muteGain = audioContext.createGain()
+      muteGain.gain.value = 0
+
+      processor.onaudioprocess = event => {
+        if (!socket || socket.readyState !== WebSocket.OPEN) {
+          return
+        }
+
+        const input = event.inputBuffer.getChannelData(0)
+        const copy = new Float32Array(input.length)
+        copy.set(input)
+        socket.send(copy.buffer)
+      }
+
+      source.connect(processor)
+      processor.connect(muteGain)
+      muteGain.connect(audioContext.destination)
+
+      isRecording = true
+      setStatus("Recording and streaming PCM...")
+      log(`Recording started at browser sample rate ${audioContext.sampleRate}`)
+
+      pollHandle = setInterval(checkStopFlag, 250)
+    }
+
+    async function stopRecording() {
+      if (!isRecording) {
+        return
       }
 
       if (pollHandle) {
@@ -162,45 +206,73 @@
         pollHandle = null
       }
 
-      stream.getTracks().forEach(track => track.stop())
-      isRecording = false
-    }
-
-    mediaRecorder.start()
-    isRecording = true
-    setStatus("Recording...")
-    log("Recording started")
-
-    pollHandle = setInterval(checkStopFlag, 1000)
-  }
-
-  async function checkStopFlag() {
-    try {
-      const result = await fetchJson("/api/should-stop")
-      if (result.stop_requested && mediaRecorder && isRecording) {
-        log("Stop requested by server")
-        mediaRecorder.stop()
+      if (processor) {
+        processor.disconnect()
+        processor = null
       }
-    } catch (error) {
-      log(`Polling failed: ${error.message}`)
-    }
-  }
 
-  async function init() {
+      if (source) {
+        source.disconnect()
+        source = null
+      }
+
+      if (muteGain) {
+        muteGain.disconnect()
+        muteGain = null
+      }
+
+      if (audioContext) {
+        await audioContext.close()
+        audioContext = null
+      }
+
+      if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send("stop")
+        socket.close()
+      }
+
+      if (mediaStream) {
+        mediaStream.getTracks().forEach(track => track.stop())
+        mediaStream = null
+      }
+
+      socket = null
+      isRecording = false
+      setStatus("Recording stopped")
+      log("Recording stopped")
+    }
+
+    async function checkStopFlag() {
+      try {
+        const result = await fetchJson("/api/should-stop")
+        if (result.stop_requested && isRecording) {
+          log("Stop requested by server")
+          await stopRecording()
+        }
+      } catch (error) {
+        log(`Polling failed: ${error.message}`)
+      }
+    }
+
+    manualStartBtn.addEventListener("click", async () => {
+      try {
+        await startRecording()
+      } catch (error) {
+        setStatus("Microphone access failed")
+        log(`Manual start failed: ${error.message}`)
+      }
+    })
+
+    manualStopBtn.addEventListener("click", async () => {
+      try {
+        await stopRecording()
+      } catch (error) {
+        log(`Manual stop failed: ${error.message}`)
+      }
+    })
+
     setStatus("Ready")
     log("Page loaded")
-  }
-
-  manualStartBtn.addEventListener("click", async () => {
-    try {
-      await startRecording()
-    } catch (error) {
-      setStatus("Microphone access failed")
-      log(`Manual start failed: ${error.message}`)
-    }
-  })
-
-  init()
-</script>
+  </script>
 </body>
 </html>

@@ -1,33 +1,39 @@
+import asyncio
 import socket
+from dataclasses import dataclass, field
+from datetime import datetime, timezone, timedelta
 from ipaddress import ip_address
 from pathlib import Path
-from datetime import datetime, timezone, timedelta
 
 from cryptography import x509
-from cryptography.hazmat._oid import NameOID, ExtendedKeyUsageOID
+from cryptography.hazmat._oid import ExtendedKeyUsageOID, NameOID
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 app = FastAPI()
 
-state = {
-    "waiting_for_device": False,
-    "device_ready": False,
-    "stop_requested": False,
-}
-
 BASE_DIR = Path(__file__).resolve().parent
-
-recordings_dir = BASE_DIR / "recordings"
-recordings_dir.mkdir(parents=True, exist_ok=True)
-
 static_dir = BASE_DIR / "static"
+static_dir.mkdir(parents=True, exist_ok=True)
 
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
+
+@dataclass
+class PcmAudioSession:
+    queue: asyncio.Queue[bytes | None] = field(default_factory=asyncio.Queue)
+    waiting_for_device: bool = False
+    device_ready: bool = False
+    stop_requested: bool = False
+    upload_active: bool = False
+    download_active: bool = False
+    sample_rate: int | None = None
+
+
+pcm_session = PcmAudioSession()
 
 
 def _get_local_ips() -> list[str]:
@@ -117,80 +123,152 @@ def ensure_dev_cert(cert_path: Path, key_path: Path) -> tuple[Path, Path]:
 
     return cert_path, key_path
 
+
 cert_dir = BASE_DIR / "certs"
 cert_path = cert_dir / "dev-cert.pem"
 key_path = cert_dir / "dev-key.pem"
-
 cert_path, key_path = ensure_dev_cert(cert_path, key_path)
+
+
+def _state_json() -> dict[str, object]:
+    return {
+        "waiting_for_device": pcm_session.waiting_for_device,
+        "device_ready": pcm_session.device_ready,
+        "stop_requested": pcm_session.stop_requested,
+        "upload_active": pcm_session.upload_active,
+        "download_active": pcm_session.download_active,
+        "sample_rate": pcm_session.sample_rate,
+    }
+
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
-    html = Path(f"{static_dir}/index.html").read_text(encoding="utf-8")
+    html = static_dir.joinpath("index.html").read_text(encoding="utf-8")
     return HTMLResponse(content=html)
 
 
 @app.get("/api/status")
 async def get_status():
-    return JSONResponse(
-        {
-            "waiting_for_device": state["waiting_for_device"],
-            "device_ready": state["device_ready"],
-            "stop_requested": state["stop_requested"],
-        }
-    )
+    return JSONResponse(_state_json())
 
 
 @app.post("/api/device-ready")
 async def device_ready():
-    if state["waiting_for_device"]:
-        state["device_ready"] = True
-        state["stop_requested"] = False
+    if pcm_session.waiting_for_device:
+        pcm_session.device_ready = True
+        pcm_session.stop_requested = False
         return {"ok": True, "message": "Device marked as ready"}
+
     return {"ok": False, "message": "Server is not waiting for a device"}
 
 
 @app.get("/api/should-stop")
 async def should_stop():
-    return {"stop_requested": state["stop_requested"]}
-
-
-@app.post("/api/upload-recording")
-async def upload_recording(file: UploadFile = File(...)):
-    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S_%f")
-    suffix = Path(file.filename or "recording.webm").suffix or ".webm"
-    target = recordings_dir / f"recording_{timestamp}{suffix}"
-
-    content = await file.read()
-    target.write_bytes(content)
-
-    state["waiting_for_device"] = False
-    state["device_ready"] = False
-    state["stop_requested"] = False
-
-    return {
-        "ok": True,
-        "filename": str(target),
-        "size": len(content),
-    }
+    return {"stop_requested": pcm_session.stop_requested}
 
 
 @app.post("/api/admin/start-waiting")
 async def start_waiting():
-    state["waiting_for_device"] = True
-    state["device_ready"] = False
-    state["stop_requested"] = False
-    return {"ok": True, "state": state}
+    global pcm_session
+
+    await pcm_session.queue.put(None)
+
+    pcm_session = PcmAudioSession(
+        waiting_for_device=True,
+        device_ready=False,
+        stop_requested=False,
+        upload_active=False,
+        download_active=False,
+        sample_rate=None,
+    )
+
+    return {"ok": True, "state": _state_json()}
 
 
 @app.post("/api/admin/request-stop")
 async def request_stop():
-    state["stop_requested"] = True
-    return {"ok": True, "state": state}
+    pcm_session.stop_requested = True
+    await pcm_session.queue.put(None)
+    return {"ok": True, "state": _state_json()}
 
 
 @app.post("/api/admin/reset")
 async def reset():
-    state["waiting_for_device"] = False
-    state["device_ready"] = False
-    state["stop_requested"] = False
-    return {"ok": True, "state": state}
+    global pcm_session
+
+    await pcm_session.queue.put(None)
+    pcm_session = PcmAudioSession()
+
+    return {"ok": True, "state": _state_json()}
+
+
+@app.websocket("/api/pcm-upload")
+async def pcm_upload(websocket: WebSocket):
+    await websocket.accept()
+
+    if not pcm_session.waiting_for_device or not pcm_session.device_ready:
+        await websocket.close(code=1008)
+        return
+
+    try:
+        hello = await websocket.receive_json()
+        pcm_session.sample_rate = int(hello["sample_rate"])
+        pcm_session.upload_active = True
+
+        while True:
+            message = await websocket.receive()
+
+            if message.get("type") == "websocket.disconnect":
+                break
+
+            data = message.get("bytes")
+            text = message.get("text")
+
+            if data is not None:
+                await pcm_session.queue.put(data)
+
+            if text == "stop":
+                break
+
+    except WebSocketDisconnect:
+        pass
+
+    finally:
+        pcm_session.upload_active = False
+        pcm_session.waiting_for_device = False
+        pcm_session.device_ready = False
+        pcm_session.stop_requested = False
+        await pcm_session.queue.put(None)
+
+
+@app.websocket("/api/pcm-download")
+async def pcm_download(websocket: WebSocket):
+    await websocket.accept()
+
+    pcm_session.download_active = True
+    print("Download client connected.")
+
+    try:
+        await websocket.send_json(
+            {
+                "type": "metadata",
+                "sample_rate": pcm_session.sample_rate,
+                "dtype": "float32",
+                "channels": 1,
+            }
+        )
+
+        while True:
+            chunk = await pcm_session.queue.get()
+
+            if chunk is None:
+                await websocket.send_json({"type": "stop"})
+                break
+
+            await websocket.send_bytes(chunk)
+
+    except WebSocketDisconnect:
+        pass
+
+    finally:
+        pcm_session.download_active = False
