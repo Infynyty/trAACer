@@ -295,9 +295,6 @@ class WebserverDeviceLayerSenderSink(Sink[AudioSampleBlock]):
                     audio = self._prepare_audio(packet.data)
                     await asyncio.to_thread(output_stream.write, audio)
 
-                    if packet.is_final:
-                        break
-
         finally:
             pass
             # await asyncio.to_thread(self._stop_blocking)

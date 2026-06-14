@@ -1,10 +1,12 @@
 import asyncio
 import socket
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone, timedelta
 from ipaddress import ip_address
 from pathlib import Path
 
+import qrcode
 from cryptography import x509
 from cryptography.hazmat._oid import ExtendedKeyUsageOID, NameOID
 from cryptography.hazmat.primitives import hashes, serialization
@@ -204,10 +206,13 @@ async def reset():
 
 @app.websocket("/api/pcm-upload")
 async def pcm_upload(websocket: WebSocket):
+    print("Trying to connect")
     await websocket.accept()
+    print("Connected")
 
-    if not pcm_session.waiting_for_device or not pcm_session.device_ready:
+    if not pcm_session.waiting_for_device:
         await websocket.close(code=1008)
+        print("Closed")
         return
 
     try:
@@ -231,9 +236,11 @@ async def pcm_upload(websocket: WebSocket):
                 break
 
     except WebSocketDisconnect:
+        print("Stopped the ws")
         pass
 
     finally:
+        print("Went to finally")
         pcm_session.upload_active = False
         pcm_session.waiting_for_device = False
         pcm_session.device_ready = False

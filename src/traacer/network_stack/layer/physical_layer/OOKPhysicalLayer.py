@@ -1,6 +1,9 @@
+from dataclasses import dataclass
+
 import numpy as np
 
 from traacer.metrics.plot import plot_signal, plot_fft, plot_signal_with_signal_boundaries, q
+from traacer.network_stack.layer.base import BitBlock, AudioSampleBlock, Stage, Stream
 from traacer.network_stack.layer.device_layer.DeviceLayer import DeviceLayerSender, DeviceLayerReceiver
 from traacer.network_stack.layer.payload_layer.LinkLayer import LinkLayerReceiver
 from traacer.network_stack.layer.physical_layer.PhysicalLayerUtil import bytes_to_bits, manchester_encode, \
@@ -165,3 +168,95 @@ class OOKPhysicalLayerReceiver:
         self.link_layer_receiver.send_up(
             PhysicalLayerPacket(np.frombuffer(data, dtype=np.uint8))
         )
+
+@dataclass(frozen=True)
+class OOKConfig:
+    sample_rate: int
+    symbol_rate: float
+    carrier_frequency: float
+    amplitude: float = 0.8
+    ramp_duration: float = 0.002
+    continuous_phase: bool = True
+
+    @property
+    def samples_per_symbol(self) -> int:
+        return int(round(self.sample_rate / self.symbol_rate))
+
+    @property
+    def ramp_samples(self) -> int:
+        return min(
+            int(round(self.ramp_duration * self.sample_rate)),
+            self.samples_per_symbol // 2,
+        )
+
+
+class BitsToOOKAudioSamples(Stage[BitBlock, AudioSampleBlock]):
+    def __init__(self, config: OOKConfig):
+        self.config = config
+        self.phase = 0.0
+
+        if config.samples_per_symbol <= 0:
+            raise ValueError("samples_per_symbol must be positive")
+
+        if config.amplitude < 0:
+            raise ValueError("amplitude must be non-negative")
+
+    async def process(
+        self,
+        stream: Stream[BitBlock],
+    ) -> Stream[AudioSampleBlock]:
+        async for block in stream:
+            samples = self._modulate_bits(block.data)
+
+            yield AudioSampleBlock(
+                data=samples,
+                is_final=block.is_final,
+                metadata=block.metadata,
+            )
+
+    def _modulate_bits(self, bits: np.ndarray) -> np.ndarray:
+        output = np.empty(
+            len(bits) * self.config.samples_per_symbol,
+            dtype=np.float64,
+        )
+
+        offset = 0
+
+        for bit in bits:
+            symbol = self._modulate_symbol(int(bit))
+            output[offset:offset + self.config.samples_per_symbol] = symbol
+            offset += self.config.samples_per_symbol
+
+        return output
+
+    def _modulate_symbol(self, bit: int) -> np.ndarray:
+        n = self.config.samples_per_symbol
+        t = np.arange(n, dtype=np.float64) / self.config.sample_rate
+
+        phase = self.phase if self.config.continuous_phase else 0.0
+        carrier = np.sin(
+            2.0 * np.pi * self.config.carrier_frequency * t + phase
+        )
+
+        if self.config.continuous_phase:
+            self.phase = (
+                phase
+                + 2.0 * np.pi * self.config.carrier_frequency * n / self.config.sample_rate
+            ) % (2.0 * np.pi)
+
+        if bit == 0:
+            return np.zeros(n, dtype=np.float64)
+
+        if bit != 1:
+            raise ValueError(f"OOK bits must be 0 or 1, got {bit}")
+
+        symbol = self.config.amplitude * carrier
+        ramp = self.config.ramp_samples
+
+        if ramp > 0:
+            fade_in = np.linspace(0.0, 1.0, ramp, endpoint=False)
+            fade_out = np.linspace(1.0, 0.0, ramp, endpoint=False)
+            symbol[:ramp] *= fade_in
+            symbol[-ramp:] *= fade_out
+
+        return symbol

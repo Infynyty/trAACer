@@ -13,5 +13,6 @@ dependencies = [
     "python-multipart",
     "av",
     "cryptography",
-    "websockets"
+    "websockets",
+    "qrcode[pil]",
 ]

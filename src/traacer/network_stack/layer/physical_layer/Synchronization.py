@@ -1,7 +1,9 @@
 from dataclasses import dataclass
 
 import numpy as np
+from scipy.signal import correlate
 
+from traacer.metrics.plot import plot_signal
 from traacer.network_stack.layer.base import AudioSampleBlock, Stage, Stream, AudioSampleArray, DataBlock
 
 
@@ -91,6 +93,7 @@ class FindPackets(Stage[AudioSampleBlock, PacketAudioSampleBlock]):
                     break
 
                 preamble_start, packet_start, packet_end, score = detection
+                plot_signal(self.buffer[preamble_start:packet_end])
 
                 yield PacketAudioSampleBlock(
                     data=self.buffer[packet_start:packet_end],
@@ -105,20 +108,22 @@ class FindPackets(Stage[AudioSampleBlock, PacketAudioSampleBlock]):
                 self.buffer = self.buffer[packet_end:]
                 self.absolute_offset += packet_end
 
-
     def _normalized_correlation(
             self,
             samples: np.typing.NDArray[np.floating],
             preamble: np.typing.NDArray[np.floating],
     ) -> np.typing.NDArray[np.float64]:
-        samples = samples.astype(np.float64)
-        preamble = preamble.astype(np.float64)
+        samples = samples.astype(np.float64, copy=False)
+        preamble = preamble.astype(np.float64, copy=False)
 
-        corr = np.correlate(samples, preamble, mode="valid")
+        m = len(preamble)
 
-        window_energy = np.sqrt(
-            np.convolve(samples * samples, np.ones(len(preamble)), mode="valid")
-        )
+        corr = correlate(samples, preamble, mode="valid", method="fft")
+
+        samples_sq = samples * samples
+        cs = np.concatenate(([0.0], np.cumsum(samples_sq)))
+        window_energy = np.sqrt(cs[m:] - cs[:-m])
+
         preamble_energy = np.linalg.norm(preamble)
 
         return corr / (window_energy * preamble_energy + 1e-12)

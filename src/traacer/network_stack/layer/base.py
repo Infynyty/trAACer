@@ -6,6 +6,8 @@ from typing import Generic, TypeAlias, TypeVar
 
 import numpy as np
 
+from traacer.metrics.bit_comparator import bit_queue
+
 T = TypeVar("T")
 InT = TypeVar("InT")
 OutT = TypeVar("OutT")
@@ -77,6 +79,7 @@ class DataBlock(Generic[T]):
 BitArray: TypeAlias = np.typing.NDArray[np.uint8]
 ByteArray: TypeAlias = np.typing.NDArray[np.uint8]
 IntArray: TypeAlias = np.typing.NDArray[np.uint64]
+ComplexArray: TypeAlias = np.typing.NDArray[np.complex128]
 AudioSampleArray: TypeAlias = np.typing.NDArray[np.float64]
 
 @dataclass(frozen=True, slots=True)
@@ -109,6 +112,7 @@ class CharToBytes(Stage[CharBlock, ByteBlock]):
 class BytesToBits(Stage[ByteBlock, BitBlock]):
     async def process(self, stream: Stream[ByteBlock]) -> Stream[BitBlock]:
         async for block in stream:
+            print("Bits sent: " + str(np.unpackbits(block.data)))
             yield BitBlock(
                 data=np.unpackbits(block.data),
                 is_final=block.is_final,
@@ -129,12 +133,13 @@ class BitsToBytes(StreamingProcessor[BitBlock, ByteBlock]):
             usable_len = len(bits)
 
         usable = bits[:usable_len]
-        self.buffer = bits[usable_len:]
+        self.buffer: BitArray = np.empty(0, dtype=np.uint8)
 
         if len(usable) == 0:
             return []
 
         bytes_ = np.packbits(usable, bitorder="big")
+        print("Bits received: " + str(bits))
 
         return [
             ByteBlock(
@@ -151,7 +156,7 @@ class BytesToChar(Stage[ByteBlock, CharBlock]):
     async def process(self, stream: Stream[ByteBlock]) -> Stream[BitBlock]:
         async for block in stream:
             yield BitBlock(
-                data=block.data.tobytes().decode("utf-8"),
+                data=block.data.tobytes().decode("utf-8", errors="replace"),
                 is_final=block.is_final,
                 metadata=block.metadata,
             )
@@ -160,4 +165,9 @@ class BytesToChar(Stage[ByteBlock, CharBlock]):
 async def string_source(text: str) -> Stream[CharBlock]:
     yield CharBlock(data=text, is_final=True)
 
+async def user_input_source() -> Stream[CharBlock]:
+    while True:
+        text = await asyncio.to_thread(input, "Input some text...")
+        for c in list(text):
+            yield CharBlock(data=c, is_final=True)
 
