@@ -1,16 +1,23 @@
+from dataclasses import dataclass
+
+import traceback
+
 import asyncio
 import socket
 import threading
 from random import sample
 
 import numpy as np
+import matplotlib.pyplot as plt
 import qrcode
 import uvicorn
 
 from traacer.network_stack.layer.base import Stream, CharBlock, CharToBytes, BytesToBits, ProcessorStage, BitsToBytes, \
-    BytesToChar, user_input_source
+    BytesToChar, user_input_source, repeated_char_source, repeated_bit_source, ByteBlock
 from traacer.network_stack.layer.device_layer.WebserverDeviceLayer import WebserverDeviceLayerSenderSink, \
     WebserverDeviceLayerReceiverSource
+from traacer.network_stack.layer.payload_layer.Image import ImageConfig, ImageDisplaySink, \
+    TestImageSource
 from traacer.network_stack.layer.physical_layer.ErrorCorrection import Repeat3, Repeat3Corrector, AddGuardSilence
 from traacer.network_stack.layer.physical_layer.FSKPhysicalLayer import BitsToFSKSymbols, FSKSymbolsToAudioSamples, \
     PacketAudioSamplesToFSKSymbols, FSKSymbolsToBits, FSKConfig
@@ -81,7 +88,12 @@ def run_webserver() -> None:
         raise
 
 async def main() -> None:
-    source = user_input_source()
+    image_config = ImageConfig(
+        width=32,
+        height=32,
+        packet_size=8
+    )
+    source = TestImageSource(config=image_config)
     webserver_thread = threading.Thread(
         target=run_webserver,
         daemon=False,
@@ -94,35 +106,37 @@ async def main() -> None:
         sample_rate=48000,
         cp_len=256,
         n_fft=1024,
-        pilot_spacing=3,
+        pilot_spacing=8,
         pilot_value=1,
-        num_positive_subcarriers=16
+        num_positive_subcarriers=32
     )
 
     iq_config = IQConfig(
         carrier_frequency=12000,
         sample_rate=48000,
-        lowpass_cutoff=1000,
+        lowpass_cutoff=4000,
         numtaps=257,
         carrier_phase_origin=0
     )
 
     preamble = np.concat(
-        [np.tile(create_chirp_preamble(start_frequency=500, end_frequency=16000, duration_in_sec=0.02), 4),
-         np.tile(create_chirp_preamble(start_frequency=16000, end_frequency=500, duration_in_sec=0.02), 4)])
+        [np.tile(create_chirp_preamble(start_frequency=500, end_frequency=16000, duration_in_sec=0.02), 1),
+         np.tile(create_chirp_preamble(start_frequency=16000, end_frequency=500, duration_in_sec=0.02), 1),
+         np.zeros(10000, dtype=np.float64)
+         ])
 
     char_to_bytes = CharToBytes()
     bytes_to_bits = BytesToBits()
-    bits_with_header = AddBitLengthHeader(header_bits=4)
+    bits_with_header = AddBitLengthHeader(header_bits=8)
     bits_to_duplicate = Repeat3()
-    bits_to_qam = ProcessorStage(BitsToQAMSymbols(2))
+    bits_to_qam = ProcessorStage(BitsToQAMSymbols(4))
     qam_to_ofdm = QAMSymbolsToOFDMFrame(ofdm_config)
     ofdm_to_audio = IQSymbolsToAudioSamples(iq_config)
     symbols_with_preamble = PrependPreamble(preamble)
     symbols_with_guard = AddGuardSilence(10000)
 
-    byte_stream = char_to_bytes.process(source)
-    bit_stream = bytes_to_bits.process(byte_stream)
+    #byte_stream = char_to_bytes.process(source)
+    bit_stream = bytes_to_bits.process(source.stream())
     bit_stream_with_header = bits_with_header.process(bit_stream)
     repeated_bit_stream = bits_to_duplicate.process(bit_stream_with_header)
     qam_stream = bits_to_qam.process(repeated_bit_stream)
@@ -144,15 +158,16 @@ async def main() -> None:
     find_packets = FindPackets(
         preamble=preamble,
         packet_num_samples=ofdm_config.get_samples_per_ofdm_frame(),
-        threshold=0.7,
+        threshold=0.6,
     )
 
     packet_audio_to_iq_symbols = AudioSamplesToIQSymbols(iq_config)
     iq_symbols_to_qam_symbols = ProcessorStage(IQSymbolsToQAMSymbols(ofdm_config))
-    qam_symbols_to_bits = QAMSymbolsToBits(2)
+    qam_symbols_to_bits = QAMSymbolsToBits(4)
     bits_to_deduped = ProcessorStage(Repeat3Corrector())
-    bits_without_header = ProcessorStage(RemoveBitLengthHeader(4))
+    bits_without_header = ProcessorStage(RemoveBitLengthHeader(8))
     bits_to_bytes = ProcessorStage(BitsToBytes())
+    sink = ImageDisplaySink(config=image_config)
     bytes_to_char = BytesToChar()
 
     received_audio_stream = receiver.stream()
@@ -168,15 +183,12 @@ async def main() -> None:
     async def run_tx() -> None:
         try:
             await sender.consume(audio_with_guard_stream)
-        except Exception:
+        except Exception as e:
+            traceback.print_exc()
             print("Got exception")
             await run_tx()
 
     async def run_rx() -> None:
-        async for block in rx_char_stream:
-            print(block.data)
+        await sink.consume(rx_byte_stream)
 
     await asyncio.gather(run_rx(), run_tx())
-
-
-asyncio.run(main())

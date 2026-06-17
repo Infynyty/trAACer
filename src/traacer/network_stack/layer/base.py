@@ -6,7 +6,6 @@ from typing import Generic, TypeAlias, TypeVar
 
 import numpy as np
 
-from traacer.metrics.bit_comparator import bit_queue
 
 T = TypeVar("T")
 InT = TypeVar("InT")
@@ -112,7 +111,7 @@ class CharToBytes(Stage[CharBlock, ByteBlock]):
 class BytesToBits(Stage[ByteBlock, BitBlock]):
     async def process(self, stream: Stream[ByteBlock]) -> Stream[BitBlock]:
         async for block in stream:
-            print("Bits sent: " + str(np.unpackbits(block.data)))
+            print("Char bits sent: " + str(np.unpackbits(block.data)))
             yield BitBlock(
                 data=np.unpackbits(block.data),
                 is_final=block.is_final,
@@ -124,7 +123,8 @@ class BitsToBytes(StreamingProcessor[BitBlock, ByteBlock]):
         self.buffer: BitArray = np.empty(0, dtype=np.uint8)
 
     def push(self, block: BitBlock) -> Iterable[ByteBlock]:
-        bits = np.concatenate([self.buffer, block.data])
+        #bits = np.concatenate([self.buffer, block.data])
+        bits = block.data
         usable_len = len(bits) - (len(bits) % 8)
 
         if block.is_final and len(bits) % 8:
@@ -139,7 +139,7 @@ class BitsToBytes(StreamingProcessor[BitBlock, ByteBlock]):
             return []
 
         bytes_ = np.packbits(usable, bitorder="big")
-        print("Bits received: " + str(bits))
+        print("Char Bits received: " + str(bits))
 
         return [
             ByteBlock(
@@ -168,6 +168,25 @@ async def string_source(text: str) -> Stream[CharBlock]:
 async def user_input_source() -> Stream[CharBlock]:
     while True:
         text = await asyncio.to_thread(input, "Input some text...")
-        for c in list(text):
-            yield CharBlock(data=c, is_final=True)
 
+        yield CharBlock(data=text, is_final=True)
+
+async def repeated_char_source(
+    char: str = "a",
+    delay_seconds: float = 1.0,
+) -> Stream[CharBlock]:
+    if len(char) != 1:
+        raise ValueError("char must be exactly one character")
+
+    while True:
+        yield CharBlock(data=char, is_final=True)
+        await asyncio.sleep(delay_seconds)
+
+async def repeated_bit_source(
+    bits,
+    delay_seconds: float = 1.0,
+) -> Stream[BitBlock]:
+
+    while True:
+        yield BitBlock(data=np.asarray(bits, dtype=np.uint8))
+        await asyncio.sleep(delay_seconds)

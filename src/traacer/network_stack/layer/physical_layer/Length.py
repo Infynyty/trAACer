@@ -34,7 +34,7 @@ class RemoveBitLengthHeader(StreamingProcessor[BitBlock, BitBlock]):
         self.payload_len: int | None = None
 
     def push(self, block: BitBlock) -> Iterable[BitBlock]:
-        self.buffer = np.concatenate([self.buffer, block.data.astype(np.uint8)])
+        self.buffer = np.concatenate([block.data.astype(np.uint8)]) #todo fix
 
         if self.payload_len is None:
             if len(self.buffer) < self.header_bits:
@@ -49,6 +49,8 @@ class RemoveBitLengthHeader(StreamingProcessor[BitBlock, BitBlock]):
 
         payload = self.buffer[:self.payload_len]
         self.buffer = np.empty(0, dtype=np.uint8)
+
+        print("Final bits received: " + str(payload))
 
         out = BitBlock(
             data=payload,

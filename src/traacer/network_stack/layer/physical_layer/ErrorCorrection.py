@@ -2,14 +2,15 @@ from typing import Iterable
 
 import numpy as np
 
-from traacer.metrics.bit_comparator import bit_queue
+from traacer.metrics.bit_comparator import bit_send_queue
 from traacer.network_stack.layer.base import Stage, BitBlock, Stream, StreamingProcessor, AudioSampleBlock
 
 
 class Repeat3(Stage[BitBlock, BitBlock]):
     async def process(self, stream: Stream[BitBlock]) -> Stream[BitBlock]:
         async for block in stream:
-            bit_queue.put(np.repeat(block.data, 3).astype(block.data.dtype))
+            bit_send_queue.put(np.repeat(block.data, 3).astype(block.data.dtype))
+            print("Bits sent: " + str(np.repeat(block.data, 3).astype(block.data.dtype)))
             yield BitBlock(
                 data=np.repeat(block.data, 3).astype(block.data.dtype),
                 is_final=block.is_final,
@@ -27,6 +28,7 @@ class Repeat3Corrector(StreamingProcessor[BitBlock, BitBlock]):
         usable_len = num_complete_groups * 3
 
         if usable_len == 0:
+            self.buffer = np.empty(0, dtype=np.uint8)
             return []
 
         groups = self.buffer[:usable_len].reshape(-1, 3)

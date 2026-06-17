@@ -4,7 +4,7 @@ from typing import Iterable
 import matplotlib.pyplot as plt
 import numpy as np
 
-from traacer.metrics.bit_comparator import bit_queue, compare_bits
+from traacer.metrics.bit_comparator import bit_receive_queue, compare_bits
 from traacer.metrics.plot import plot_signal, plot_constellation
 from traacer.network_stack.layer.base import StreamingProcessor, BitBlock, DataBlock, ComplexArray, InT, OutT, Stage, \
     Stream
@@ -27,33 +27,23 @@ def bits_to_qam(bits, n):
 def qam_gray_lookup_table(mu):
     if mu % 2 != 0:
         raise ValueError("n must be even for square QAM")
-
     bits_per_axis = mu // 2
     levels_per_axis = 2 ** bits_per_axis
-
     levels = np.arange(-(levels_per_axis - 1), levels_per_axis, 2)
-
     table = {}
-
     for i_idx in range(levels_per_axis):
         for q_idx in range(levels_per_axis):
             i_gray = i_idx ^ (i_idx >> 1)
             q_gray = q_idx ^ (q_idx >> 1)
-
             i_bits = tuple(map(int, format(i_gray, f"0{bits_per_axis}b")))
             q_bits = tuple(map(int, format(q_gray, f"0{bits_per_axis}b")))
-
             bits = i_bits + q_bits
             symbol = levels[i_idx] + 1j * levels[q_idx]
-
             table[bits] = symbol
-
     avg_energy = np.mean(np.abs(list(table.values())) ** 2)
     scale = np.sqrt(avg_energy)
-
     for bits in table:
         table[bits] /= scale
-
     return table
 
 @dataclass(frozen=True, slots=True)
@@ -113,12 +103,13 @@ class QAMSymbolsToBits(
 
     async def process(self, stream: Stream[QAMSymbolBlock]) -> Stream[BitBlock]:
         async for block in stream:
+            plot_constellation(block.data, "Constellations")
             distances = np.abs(block.data[:, None] - self.constellation[None, :])
             nearest_indices = np.argmin(distances, axis=1)
 
             output_bits = self.bit_pattern_array[nearest_indices].reshape(-1)
 
-            bit_queue.put(output_bits)
+            bit_receive_queue.put(output_bits)
             compare_bits()
 
             yield BitBlock(
