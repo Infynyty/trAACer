@@ -10,7 +10,7 @@ from traacer.network_stack.layer.base import CharToBytes, BytesToBits, Processor
 from traacer.network_stack.layer.device_layer.WebserverDeviceLayer import WebserverDeviceLayerSenderSink, \
     WebserverDeviceLayerReceiverSource
 from traacer.network_stack.layer.physical_layer.ErrorCorrection import Repeat3Corrector, Repeat3
-from traacer.network_stack.layer.physical_layer.FSKPhysicalLayer import FSKConfig, BitsToFSKSymbols, \
+from traacer.network_stack.layer.physical_layer.modulation.FSKPhysicalLayer import FSKConfig, BitsToFSKSymbols, \
     FSKSymbolsToAudioSamples, PacketAudioSamplesToFSKSymbols, FSKSymbolsToBits
 from traacer.network_stack.layer.physical_layer.Length import RemoveBitLengthHeader, AddBitLengthHeader
 from traacer.network_stack.layer.physical_layer.Synchronization import create_chirp_preamble, PrependPreamble, \

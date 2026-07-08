@@ -1,24 +1,17 @@
-import queue
-import sys
 import threading
-from time import sleep
 
 import numpy as np
 import uvicorn
-from matplotlib import pyplot as plt
 
 from traacer.metrics.bit_comparator import bit_queue, compare_bits
-from traacer.metrics.plot import compare_signals, wait_for_signals
-from traacer.network_stack.layer.device_layer.WAVDeviceLayer import WAVDeviceLayerReceiver, WAVDeviceLayerSender
 from traacer.network_stack.layer.device_layer.WebserverDeviceLayer import WebserverDeviceLayerReceiver, WebserverDeviceLayerSender
 from traacer.network_stack.layer.payload_layer.LinkLayer import NoopLinkLayerReceiver
 from traacer.network_stack.layer.physical_layer.CSSPhysicalLayer import CSSPhysicalLayerReceiver, CSSPhysicalLayerSender
-from traacer.network_stack.layer.physical_layer.FSKPhysicalLayer import FSKPhysicalLayerSender, FSKPhysicalLayerReceiver
+from traacer.network_stack.layer.physical_layer.modulation.FSKPhysicalLayer import FSKPhysicalLayerSender, FSKPhysicalLayerReceiver
 from traacer.network_stack.layer.physical_layer.OFDMPhysicalLayer import OFDMPhysicalLayerSender, \
     OFDMPhysicalLayerReceiver
 from traacer.network_stack.layer.physical_layer.OOKPhysicalLayer import OOKPhysicalLayerReceiver, OOKPhysicalLayerSender
-from traacer.network_stack.layer.physical_layer.PSKPhysicalLayer import PSKPhysicalLayerSender
-from traacer.network_stack.layer.physical_layer.PhysicalLayerUtil import bytes_to_bits
+from traacer.network_stack.layer.physical_layer.modulation.PSKPhysicalLayer import PSKPhysicalLayerSender
 from traacer.network_stack.packet import LinkLayerPacket
 from traacer.receiver.server import app, cert_path, key_path
 

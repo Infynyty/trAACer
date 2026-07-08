@@ -1,14 +1,13 @@
 from dataclasses import dataclass
 from typing import Iterable
 
-import matplotlib.pyplot as plt
 import numpy as np
 
 from traacer.metrics.bit_comparator import bit_receive_queue, compare_bits
-from traacer.metrics.plot import plot_signal, plot_constellation
-from traacer.network_stack.layer.base import StreamingProcessor, BitBlock, DataBlock, ComplexArray, InT, OutT, Stage, \
+from traacer.metrics.plot import plot_constellation
+from traacer.network_stack.layer.base import StreamingProcessor, BitBlock, DataBlock, ComplexArray, Stage, \
     Stream
-from traacer.network_stack.layer.physical_layer.IQModulator import iq_modulate, iq_demodulate, IQSymbolBlock
+from traacer.network_stack.layer.physical_layer.modulation.IQModulator import iq_modulate, IQSymbolBlock
 
 
 def bits_to_qam(bits, n):
