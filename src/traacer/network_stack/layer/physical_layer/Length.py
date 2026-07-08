@@ -38,6 +38,7 @@ class RemoveBitLengthHeader(StreamingProcessor[BitBlock, BitBlock]):
 
         if self.payload_len is None:
             if len(self.buffer) < self.header_bits:
+                self.buffer = np.empty(0, dtype=np.uint8)
                 return []
 
             self.payload_len = bits_to_int(self.buffer[:self.header_bits])
@@ -45,6 +46,8 @@ class RemoveBitLengthHeader(StreamingProcessor[BitBlock, BitBlock]):
             self.buffer = self.buffer[self.header_bits:]
 
         if len(self.buffer) < self.payload_len:
+            self.buffer = np.empty(0, dtype=np.uint8)
+            self.payload_len = None
             return []
 
         payload = self.buffer[:self.payload_len]

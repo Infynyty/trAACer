@@ -120,10 +120,7 @@ async def main() -> None:
     )
 
     preamble = np.concat(
-        [np.tile(create_chirp_preamble(start_frequency=500, end_frequency=16000, duration_in_sec=0.02), 1),
-         np.tile(create_chirp_preamble(start_frequency=16000, end_frequency=500, duration_in_sec=0.02), 1),
-         np.zeros(10000, dtype=np.float64)
-         ])
+        [])
 
     char_to_bytes = CharToBytes()
     bytes_to_bits = BytesToBits()
@@ -192,3 +189,4 @@ async def main() -> None:
         await sink.consume(rx_byte_stream)
 
     await asyncio.gather(run_rx(), run_tx())
+

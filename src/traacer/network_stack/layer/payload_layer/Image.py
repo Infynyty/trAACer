@@ -84,6 +84,14 @@ class TestImageSource(Source[ByteBlock]):
 
         return image
 
+    def display_image(self) -> None:
+        image = self.create_test_image()
+
+        plt.figure(figsize=(6, 6))
+        plt.imshow(image, cmap="gray", vmin=0, vmax=255)
+        plt.axis("off")
+        plt.show()
+
 
 class ImageDisplaySink(Sink[ByteBlock]):
     def __init__(self, config: ImageConfig):
@@ -135,7 +143,6 @@ class ImageDisplaySink(Sink[ByteBlock]):
             self.config.height,
             self.config.width,
         )
-
 
         clear_output()
         plt.figure(figsize=(5, 5))
