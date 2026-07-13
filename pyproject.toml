@@ -1,5 +1,5 @@
 [project]
-name = "trAACer"
+name = "traacer"
 authors = [
     {name = "Kasimir Stadie", email = "kstadie@ethz.ch"}
 ]
@@ -15,4 +15,5 @@ dependencies = [
     "cryptography",
     "websockets",
     "qrcode[pil]",
+    "scipy"
 ]

@@ -1,11 +1,15 @@
 import asyncio
+import socket
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Iterable
 from dataclasses import dataclass, field
 from typing import Generic, TypeAlias, TypeVar
 
 import numpy as np
+import qrcode
+import uvicorn
 
+from traacer.receiver.server import cert_path, key_path, app
 
 T = TypeVar("T")
 InT = TypeVar("InT")
@@ -153,9 +157,9 @@ class BitsToBytes(StreamingProcessor[BitBlock, ByteBlock]):
         return ()
 
 class BytesToChar(Stage[ByteBlock, CharBlock]):
-    async def process(self, stream: Stream[ByteBlock]) -> Stream[BitBlock]:
+    async def process(self, stream: Stream[ByteBlock]) -> Stream[CharBlock]:
         async for block in stream:
-            yield BitBlock(
+            yield CharBlock(
                 data=block.data.tobytes().decode("utf-8", errors="replace"),
                 is_final=block.is_final,
                 metadata=block.metadata,
@@ -170,6 +174,11 @@ async def user_input_source() -> Stream[CharBlock]:
         text = await asyncio.to_thread(input, "Input some text...")
 
         yield CharBlock(data=text, is_final=True)
+
+class PrintCharSink(Sink[CharBlock]):
+    async def consume(self, stream: Stream[CharBlock]) -> None:
+        async for block in stream:
+            print(block.data, end="", flush=True)
 
 async def repeated_char_source(
     char: str = "a",
@@ -190,3 +199,52 @@ async def repeated_bit_source(
     while True:
         yield BitBlock(data=np.asarray(bits, dtype=np.uint8))
         await asyncio.sleep(delay_seconds)
+
+
+def run_webserver() -> None:
+    try:
+        def get_lan_ip() -> str:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            try:
+                sock.connect(("8.8.8.8", 80))
+                return sock.getsockname()[0]
+            finally:
+                sock.close()
+
+        def print_qr_to_console(url: str) -> None:
+            qr = qrcode.QRCode(border=1)
+            qr.add_data(url)
+            qr.make(fit=True)
+
+            print()
+            print(f"Receiver URL: {url}")
+            print()
+
+            for row in qr.get_matrix():
+                print("".join("██" if cell else "  " for cell in row))
+
+            print()
+
+        host = "0.0.0.0"
+        port = 8000
+        scheme = "https"
+
+        url = f"{scheme}://{get_lan_ip()}:{port}"
+        print_qr_to_console(url)
+
+        config = uvicorn.Config(
+            app,
+            host=host,
+            port=port,
+            reload=False,
+            ssl_certfile=str(cert_path),
+            ssl_keyfile=str(key_path),
+            log_level="critical",
+        )
+
+        server = uvicorn.Server(config)
+        server.run()
+
+    except BaseException as exc:
+        print("WEBSERVER THREAD CRASHED:", repr(exc))
+        raise

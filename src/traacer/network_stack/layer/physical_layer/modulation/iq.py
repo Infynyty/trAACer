@@ -6,7 +6,7 @@ import numpy.typing as npt
 from scipy.signal import firwin, lfilter
 
 from traacer.network_stack.layer.base import Stage, DataBlock, ComplexArray, AudioSampleBlock, Stream, InT, OutT
-from traacer.network_stack.layer.physical_layer.Synchronization import PacketAudioSampleBlock
+from traacer.network_stack.layer.physical_layer.synchronization import PacketAudioSampleBlock
 
 
 def iq_modulate(

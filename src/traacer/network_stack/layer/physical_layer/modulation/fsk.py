@@ -5,24 +5,14 @@ from dataclasses import dataclass
 from typing import Iterable
 
 import numpy as np
-import qrcode
-import uvicorn
 
-from traacer.metrics.plot import plot_signal, plot_fft, q
-from traacer.network_stack.layer.base import StreamingProcessor, BitBlock, DataBlock, IntArray, InT, OutT, Stage, \
-    AudioSampleBlock, Stream, CharToBytes, BytesToBits, ProcessorStage, CharBlock, BytesToChar, BitsToBytes
-from traacer.network_stack.layer.device_layer.DeviceLayer import DeviceLayerSender
-from traacer.network_stack.layer.device_layer.WebserverDeviceLayer import WebserverDeviceLayerReceiverSource, \
-    WebserverDeviceLayerSenderSink
-from traacer.network_stack.layer.payload_layer.LinkLayer import LinkLayerReceiver
-from traacer.network_stack.layer.physical_layer.PhysicalLayerUtil import manchester_decode, bits_to_bytes, \
-    bytes_to_bits, manchester_encode
-from traacer.network_stack.layer.physical_layer.Synchronization import create_zadoff_chu_preamble, find_preamble_start, \
-    PacketAudioSampleBlock, FindPackets, PrependPreamble, create_chirp_preamble
-from traacer.network_stack.packet import LinkLayerPacket, PhysicalLayerPacket, DeviceLayerPacket
+
 
 import matplotlib.pyplot as plt
 
+from traacer.network_stack.layer.base import StreamingProcessor, BitBlock, AudioSampleBlock, Stream, Stage, DataBlock, \
+    IntArray
+from traacer.network_stack.layer.physical_layer.synchronization import PacketAudioSampleBlock
 from traacer.receiver.server import app, cert_path, key_path
 
 @dataclass(frozen=True, slots=True)
@@ -235,63 +225,5 @@ class FSKSymbolsToBits(StreamingProcessor[FSKSymbolBlock, BitBlock]):
             )
         ]
 
-async def string_source(messages: list[str]) -> Stream[CharBlock]:
-    for message in messages:
-        print("Message: " + message)
-        yield CharBlock(data=message, is_final=True)
-
-async def user_input_source() -> Stream[CharBlock]:
-    while True:
-        text = await asyncio.to_thread(input, "Input some text...")
-        yield CharBlock(data=text, is_final=True)
-
-
-def run_webserver() -> None:
-    try:
-        def get_lan_ip() -> str:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            try:
-                sock.connect(("8.8.8.8", 80))
-                return sock.getsockname()[0]
-            finally:
-                sock.close()
-
-        def print_qr_to_console(url: str) -> None:
-            qr = qrcode.QRCode(border=1)
-            qr.add_data(url)
-            qr.make(fit=True)
-
-            print()
-            print(f"Receiver URL: {url}")
-            print()
-
-            for row in qr.get_matrix():
-                print("".join("██" if cell else "  " for cell in row))
-
-            print()
-
-        host = "0.0.0.0"
-        port = 8000
-        scheme = "https"
-
-        url = f"{scheme}://{get_lan_ip()}:{port}"
-        print_qr_to_console(url)
-
-        config = uvicorn.Config(
-            app,
-            host=host,
-            port=port,
-            reload=False,
-            ssl_certfile=str(cert_path),
-            ssl_keyfile=str(key_path),
-            log_level="critical",
-        )
-
-        server = uvicorn.Server(config)
-        server.run()
-
-    except BaseException as exc:
-        print("WEBSERVER THREAD CRASHED:", repr(exc))
-        raise
 
 

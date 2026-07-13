@@ -7,7 +7,7 @@ from traacer.metrics.bit_comparator import bit_receive_queue, compare_bits
 from traacer.metrics.plot import plot_constellation
 from traacer.network_stack.layer.base import StreamingProcessor, BitBlock, DataBlock, ComplexArray, Stage, \
     Stream
-from traacer.network_stack.layer.physical_layer.modulation.IQModulator import iq_modulate, IQSymbolBlock
+from traacer.network_stack.layer.physical_layer.modulation.iq import IQSymbolBlock, iq_modulate
 
 
 def bits_to_qam(bits, n):
