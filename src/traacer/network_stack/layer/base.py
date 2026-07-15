@@ -1,5 +1,6 @@
 import asyncio
 import socket
+import time
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator, Iterable
 from dataclasses import dataclass, field
@@ -180,6 +181,124 @@ class PrintCharSink(Sink[CharBlock]):
         async for block in stream:
             print(block.data, end="", flush=True)
 
+
+class RunningSignalPlot(Stage[AudioSampleBlock, AudioSampleBlock]):
+    """Pass audio through while maintaining an efficient rolling plot."""
+
+    def __init__(
+        self,
+        sample_rate: int,
+        window_seconds: float = 1.0,
+        update_interval_seconds: float = 0.1,
+        max_plot_points: int = 2_000,
+        title: str = "Received signal (rolling)",
+        y_limit: float | None = 1.0,
+    ) -> None:
+        if sample_rate <= 0:
+            raise ValueError("sample_rate must be positive")
+        if window_seconds <= 0:
+            raise ValueError("window_seconds must be positive")
+        if update_interval_seconds <= 0:
+            raise ValueError("update_interval_seconds must be positive")
+        if max_plot_points < 2:
+            raise ValueError("max_plot_points must be at least 2")
+        if y_limit is not None and y_limit <= 0:
+            raise ValueError("y_limit must be positive or None")
+
+        self.sample_rate = sample_rate
+        self.window_seconds = window_seconds
+        self.update_interval_seconds = update_interval_seconds
+        self.max_plot_points = max_plot_points
+        self.title = title
+        self.y_limit = y_limit
+        self._max_samples = max(1, int(round(sample_rate * window_seconds)))
+        self._samples = np.empty(0, dtype=np.float64)
+        self._last_update = 0.0
+        self._figure = None
+        self._axes = None
+        self._line = None
+        self._display_handle = None
+
+    async def process(
+        self,
+        stream: Stream[AudioSampleBlock],
+    ) -> Stream[AudioSampleBlock]:
+        async for block in stream:
+            samples = np.asarray(block.data, dtype=np.float64).reshape(-1)
+            if len(samples):
+                self._samples = np.concatenate((self._samples, samples))[
+                    -self._max_samples:
+                ]
+
+            now = time.monotonic()
+            if now - self._last_update >= self.update_interval_seconds:
+                self._update_plot()
+                self._last_update = now
+
+            yield block
+
+    def _update_plot(self) -> None:
+        # Lazy imports keep plotting an optional concern for other pipelines.
+        from matplotlib import pyplot as plt
+
+        if self._figure is None:
+            self._figure, self._axes = plt.subplots(figsize=(10, 3))
+            (self._line,) = self._axes.plot([], [], linewidth=0.8)
+            self._axes.set_xlabel("Time (s)")
+            self._axes.set_ylabel("Amplitude")
+            self._axes.grid(alpha=0.25)
+            if self.y_limit is not None:
+                self._axes.set_ylim(-self.y_limit, self.y_limit)
+
+            try:
+                from IPython.display import display
+                self._display_handle = display(self._figure, display_id=True)
+            except ImportError:
+                plt.show(block=False)
+
+        x, y = self._plot_data()
+        self._line.set_data(x, y)
+        self._axes.set_xlim(-self.window_seconds, 0.0)
+
+        rms = (
+            float(np.sqrt(np.mean(np.square(self._samples))))
+            if len(self._samples) else 0.0
+        )
+        peak = (
+            float(np.max(np.abs(self._samples)))
+            if len(self._samples) else 0.0
+        )
+        self._axes.set_title(f"{self.title} — RMS {rms:.4f}, peak {peak:.4f}")
+
+        if self.y_limit is None:
+            self._axes.relim()
+            self._axes.autoscale_view(scalex=False, scaley=True)
+
+        self._figure.canvas.draw_idle()
+        if self._display_handle is not None:
+            self._display_handle.update(self._figure)
+        else:
+            plt.pause(0.001)
+
+    def _plot_data(self) -> tuple[np.ndarray, np.ndarray]:
+        sample_count = len(self._samples)
+        if sample_count == 0:
+            return np.empty(0), np.empty(0)
+
+        time_axis = (np.arange(sample_count) - sample_count) / self.sample_rate
+        bins = min(sample_count, self.max_plot_points // 2)
+        if sample_count <= bins:
+            return time_axis, self._samples
+
+        edges = np.linspace(0, sample_count, bins + 1, dtype=int)
+        x = np.empty(bins * 2, dtype=np.float64)
+        y = np.empty(bins * 2, dtype=np.float64)
+        for index, (start, stop) in enumerate(zip(edges[:-1], edges[1:])):
+            chunk = self._samples[start:stop]
+            x[index * 2:index * 2 + 2] = time_axis[(start + stop - 1) // 2]
+            y[index * 2:index * 2 + 2] = (np.min(chunk), np.max(chunk))
+        return x, y
+
 async def repeated_char_source(
     char: str = "a",
     delay_seconds: float = 1.0,
@@ -197,7 +316,7 @@ async def repeated_bit_source(
 ) -> Stream[BitBlock]:
 
     while True:
-        yield BitBlock(data=np.asarray(bits, dtype=np.uint8))
+        yield BitBlock(data=np.asarray(bits, dtype=np.uint8), is_final=True)
         await asyncio.sleep(delay_seconds)
 
 

@@ -15,5 +15,6 @@ dependencies = [
     "cryptography",
     "websockets",
     "qrcode[pil]",
-    "scipy"
+    "scipy",
+    "matplotlib"
 ]

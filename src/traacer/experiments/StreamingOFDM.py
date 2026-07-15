@@ -12,16 +12,15 @@ from traacer.network_stack.layer.base import Stream, CharBlock, CharToBytes, Byt
     BytesToChar
 from traacer.network_stack.layer.device_layer.WebserverDeviceLayer import WebserverDeviceLayerSenderSink, \
     WebserverDeviceLayerReceiverSource
-from traacer.network_stack.layer.payload_layer.Image import ImageConfig, ImageDisplaySink, \
-    TestImageSource
-from traacer.network_stack.layer.physical_layer.ErrorCorrection import Repeat3, Repeat3Corrector, AddGuardSilence
-from traacer.network_stack.layer.physical_layer.modulation.IQModulator import IQSymbolsToAudioSamples, IQConfig, \
+from traacer.network_stack.layer.payload_layer.image import ImageConfig, TestImageSource, ImageDisplaySink
+from traacer.network_stack.layer.physical_layer.error_correction import Repeat3, AddGuardSilence, Repeat3Corrector
+from traacer.network_stack.layer.physical_layer.framing import AddBitLengthHeader, RemoveBitLengthHeader
+from traacer.network_stack.layer.physical_layer.modulation.iq import IQConfig, IQSymbolsToAudioSamples, \
     AudioSamplesToIQSymbols
-from traacer.network_stack.layer.physical_layer.Length import AddBitLengthHeader, RemoveBitLengthHeader
-from traacer.network_stack.layer.physical_layer.modulation.OFDMModulator import BitsToQAMSymbols, QAMSymbolsToOFDMFrame, \
-    OFDMConfig, QAMSymbolsToBits, IQSymbolsToQAMSymbols
-from traacer.network_stack.layer.physical_layer.Synchronization import PrependPreamble, \
-    FindPackets
+from traacer.network_stack.layer.physical_layer.modulation.ofdm import OFDMConfig, BitsToQAMSymbols, \
+    QAMSymbolsToOFDMFrame, IQSymbolsToQAMSymbols, QAMSymbolsToBits
+from traacer.network_stack.layer.physical_layer.synchronization import PrependPreamble, FindPackets
+
 from traacer.receiver.server import app, cert_path, key_path
 
 
@@ -169,7 +168,6 @@ async def main() -> None:
     rx_deduped_bit_stream = bits_to_deduped.process(rx_bit_stream)
     rx_bit_length_stream = bits_without_header.process(rx_deduped_bit_stream)
     rx_byte_stream = bits_to_bytes.process(rx_bit_length_stream)
-    rx_char_stream = bytes_to_char.process(rx_byte_stream)
 
     async def run_tx() -> None:
         try:
