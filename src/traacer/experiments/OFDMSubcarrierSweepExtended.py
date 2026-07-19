@@ -56,19 +56,18 @@ from traacer.receiver.server import cert_path
 
 SAMPLE_RATE = 48_000
 CENTER_FREQUENCY_HZ = 12_000
-N_FFT = 4_096
-CYCLIC_PREFIX_SAMPLES = 1_024
+N_FFT = 32_768
+CYCLIC_PREFIX_SAMPLES = 8_192
 PILOT_SPACING = 8
 PILOT_VALUE = 1.0 + 0.0j
 QAM_BITS_PER_SYMBOL = 4
-POSITIVE_SUBCARRIER_COUNTS = (16, 32, 64, 128, 256, 512)
+POSITIVE_SUBCARRIER_COUNTS = (16, 32, 64, 128, 256, 512, 1_024, 2_048, 4_096)
 LOWPASS_CUTOFF_HZ = 10_000.0
 LOWPASS_NUMTAPS = 257
 OFDM_PEAK_AMPLITUDE = 0.7
 
-# Every selected carrier count provides a power-of-two multiple of 14 data bins.
-# 896 QAM symbols therefore fill an integer number of complete frames for every
-# run, so BER and signal-space plots never include padding symbols.
+# Larger subcarrier configurations use a partially filled final OFDM frame.
+# Received padding symbols are discarded before BER is calculated.
 QAM_SYMBOLS_PER_RUN = 896
 BIT_PATTERN_LENGTH = QAM_SYMBOLS_PER_RUN * QAM_BITS_PER_SYMBOL
 BIT_PATTERN_SEED = 0x0FD5
@@ -316,7 +315,7 @@ class OFDMSignalSpacePlot(Stage[QAMSymbolBlock, QAMSymbolBlock]):
             s=30,
             linewidths=0.9,
             label="Ideal 16-QAM",
-            zorder=1,
+            zorder=4,
         )
         limit = max(1.25, float(np.quantile(np.abs(symbols), 0.995)) * 1.1)
         axis.set_xlim(-limit, limit)
@@ -455,17 +454,6 @@ class MeasureOFDMSubcarrierBER(
                 f"{count} subcarriers do not fit around the center frequency"
             )
 
-        config = _make_ofdm_config(
-            count,
-            center_frequency_hz=self.center_frequency_hz,
-            sample_rate=self.sample_rate,
-        )
-        _, data_indices = _subcarrier_layout(config)
-        qam_symbols = len(self.bit_pattern) // QAM_BITS_PER_SYMBOL
-        if qam_symbols % len(data_indices):
-            raise ValueError(
-                f"The bit pattern does not fill complete frames for count {count}"
-            )
 
     async def process(
         self,
@@ -526,7 +514,7 @@ class MeasureOFDMSubcarrierBER(
         )
         _, data_indices = _subcarrier_layout(config)
         qam_symbols = len(self.bit_pattern) // QAM_BITS_PER_SYMBOL
-        num_frames = qam_symbols // len(data_indices)
+        num_frames = math.ceil(qam_symbols / len(data_indices))
         return num_frames * config.get_samples_per_ofdm_frame()
 
     def _try_locate_packets(self) -> tuple[_LocatedPacket, ...] | None:
@@ -1039,7 +1027,7 @@ def _parse_args() -> argparse.Namespace:
         "--subcarriers",
         type=_parse_counts,
         default=POSITIVE_SUBCARRIER_COUNTS,
-        help="Positive counts (default: 8,16,32,64,128,256,512)",
+        help="Positive counts (default: 16,32,64,128,256,512,1024,2048,4096)",
     )
     parser.add_argument(
         "--csv",

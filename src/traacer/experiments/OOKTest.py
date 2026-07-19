@@ -82,6 +82,7 @@ OOK_AMPLITUDE = 0.8
 DETECTION_THRESHOLD = 0.20
 MEASUREMENT_TIMEOUT_SECONDS = 120.0
 CSV_OUTPUT_PATH = Path("measurements/ask_ook_ber.csv")
+PLOT_OUTPUT_PATH = Path("measurements/ook-ber.svg")
 
 
 @dataclass(frozen=True, slots=True)
@@ -558,6 +559,9 @@ def plot_ook_ber(result: OOKBERResult) -> None:
         f"OOK BER versus symbol time at {result.carrier_frequency_hz:g} Hz"
     )
     ax.grid(True, which="both", alpha=0.3)
+    PLOT_OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(PLOT_OUTPUT_PATH, format="svg")
+    print(f"Plot written to {PLOT_OUTPUT_PATH}")
     plt.show()
 
 

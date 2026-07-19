@@ -71,6 +71,10 @@ ASK_AMPLITUDE = 0.8
 DETECTION_THRESHOLD = 0.20
 MEASUREMENT_TIMEOUT_SECONDS = 120.0
 CSV_OUTPUT_PATH = Path("measurements/ask_order_ber.csv")
+PLOT_OUTPUT_PATH = Path("measurements/ask-order-ber.svg")
+SIGNAL_SPACE_PLOT_OUTPUT_PATH = Path(
+    "measurements/ask-order-signal-space.svg"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -379,6 +383,15 @@ class ASKSignalSpacePlot(
         # the user with eight "waiting" panels even though later canvas draws
         # contain data. Display only once every requested order has been plotted.
         if self._plotted_orders == set(self.modulation_orders):
+            SIGNAL_SPACE_PLOT_OUTPUT_PATH.parent.mkdir(
+                parents=True,
+                exist_ok=True,
+            )
+            self._figure.savefig(
+                SIGNAL_SPACE_PLOT_OUTPUT_PATH,
+                format="svg",
+            )
+            print(f"Plot written to {SIGNAL_SPACE_PLOT_OUTPUT_PATH}")
             plt.show(block=False)
 
 
@@ -831,6 +844,9 @@ def plot_ask_order_ber(result: ASKOrderBERResult) -> None:
         f"{result.carrier_frequency_hz:g} Hz and {symbol_time_ms:g} ms/symbol"
     )
     ax.grid(True, which="both", alpha=0.3)
+    PLOT_OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(PLOT_OUTPUT_PATH, format="svg")
+    print(f"Plot written to {PLOT_OUTPUT_PATH}")
     plt.show()
 
 

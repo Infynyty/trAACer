@@ -5,6 +5,7 @@ import threading
 import time
 from contextlib import suppress
 from dataclasses import dataclass
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -43,6 +44,7 @@ NUM_RESPONSE_POINTS = 500
 MEASUREMENT_TIMEOUT_SECONDS = 60.0
 
 CSV_OUTPUT_PATH = "measurements/frequency_response.csv"
+PLOT_OUTPUT_PATH = Path("measurements/frequency-responses.svg")
 
 def write_frequency_response_csv(
     result: FrequencyResponseResult,
@@ -412,6 +414,9 @@ def plot_frequency_response(result: FrequencyResponseResult) -> None:
     )
     ax.grid(True)
     ax.legend()
+    PLOT_OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(PLOT_OUTPUT_PATH, format="svg")
+    print(f"Plot written to {PLOT_OUTPUT_PATH}")
     plt.show()
 
 

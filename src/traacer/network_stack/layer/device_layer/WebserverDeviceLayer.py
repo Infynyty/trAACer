@@ -122,22 +122,31 @@ class WebserverDeviceLayerSenderSink(Sink[AudioSampleBlock]):
         audio = np.clip(audio, -1.0, 1.0)
         return audio.astype(np.float32, copy=False)
 
+    async def play(
+        self,
+        stream: Stream[AudioSampleBlock],
+        *,
+        chunk_size: int = 2_048,
+    ) -> None:
+        """Play an audio stream with cancellation points between short chunks."""
+
+        if chunk_size <= 0:
+            raise ValueError("chunk_size must be positive")
+
+        with sd.OutputStream(
+            samplerate=self.sample_rate,
+            channels=1,
+            dtype="float32",
+        ) as output_stream:
+            async for packet in stream:
+                audio = self._prepare_audio(packet.data)
+                for start in range(0, len(audio), chunk_size):
+                    output_stream.write(audio[start:start + chunk_size])
+                    await asyncio.sleep(0)
+
     async def consume(self, stream: Stream[AudioSampleBlock]) -> None:
         await asyncio.to_thread(self._start_blocking)
-
-        try:
-            with sd.OutputStream(
-                samplerate=self.sample_rate,
-                channels=1,
-                dtype="float32",
-            ) as output_stream:
-                async for packet in stream:
-                    audio = self._prepare_audio(packet.data)
-                    await asyncio.to_thread(output_stream.write, audio)
-
-        finally:
-            pass
-            # await asyncio.to_thread(self._stop_blocking)
+        await self.play(stream)
 
 class WebserverDeviceLayerReceiverSource(Source[AudioSampleBlock]):
     def __init__(
