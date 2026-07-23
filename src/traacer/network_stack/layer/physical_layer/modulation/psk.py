@@ -175,6 +175,44 @@ class BitsToPSKAudioSamples(Stage[BitBlock, AudioSampleBlock]):
 
         return window
 
+
+class BitsToDPSKAudioSamples(BitsToPSKAudioSamples):
+    """Modulate bits as differential PSK with one initial reference symbol."""
+
+    def __init__(self, config: PSKConfig):
+        super().__init__(config)
+        self.previous_symbol_index = 0
+        self.reference_symbol_pending = True
+
+    def _modulate_bits(self, bits: np.ndarray) -> np.ndarray:
+        data_symbol_indices = self._bits_to_symbol_indices(bits)
+        num_output_symbols = len(data_symbol_indices)
+        if self.reference_symbol_pending:
+            num_output_symbols += 1
+
+        output = np.empty(
+            num_output_symbols * self.config.samples_per_symbol,
+            dtype=np.float64,
+        )
+        offset = 0
+
+        if self.reference_symbol_pending:
+            reference = self._modulate_symbol(self.previous_symbol_index)
+            output[:self.config.samples_per_symbol] = reference
+            offset = self.config.samples_per_symbol
+            self.reference_symbol_pending = False
+
+        for data_symbol_index in data_symbol_indices:
+            self.previous_symbol_index = (
+                self.previous_symbol_index + int(data_symbol_index)
+            ) % self.config.order
+            symbol = self._modulate_symbol(self.previous_symbol_index)
+            output[offset:offset + self.config.samples_per_symbol] = symbol
+            offset += self.config.samples_per_symbol
+
+        return output
+
+
 class PSKAudioSamplesToBits(Stage[AudioSampleBlock, BitBlock]):
     def __init__(self, config: PSKConfig):
         self.config = config
@@ -313,3 +351,88 @@ class PSKAudioSamplesToBits(Stage[AudioSampleBlock, BitBlock]):
             window[-ramp:] *= fade_out
 
         return window
+
+
+class DPSKAudioSamplesToBits(PSKAudioSamplesToBits):
+    """Demodulate DPSK from phase changes between consecutive symbols."""
+
+    def __init__(self, config: PSKConfig):
+        super().__init__(config)
+        self.previous_coordinate: complex | None = None
+
+    def _demodulate_samples(self, samples: np.ndarray) -> np.ndarray:
+        if len(samples) == 0:
+            return np.empty(0, dtype=np.uint8)
+
+        n = self.config.samples_per_symbol
+        if len(samples) % n != 0:
+            raise ValueError("Number of samples must be divisible by symbol size")
+
+        symbols = samples.reshape(-1, n)
+        coordinates = np.array(
+            [self._demodulate_symbol_coordinate(symbol) for symbol in symbols],
+            dtype=np.complex128,
+        )
+
+        if self.previous_coordinate is None:
+            differential_coordinates = (
+                coordinates[1:] * np.conjugate(coordinates[:-1])
+            )
+        else:
+            previous_coordinates = np.empty_like(coordinates)
+            previous_coordinates[0] = self.previous_coordinate
+            previous_coordinates[1:] = coordinates[:-1]
+            differential_coordinates = (
+                coordinates * np.conjugate(previous_coordinates)
+            )
+
+        self.previous_coordinate = complex(coordinates[-1])
+        estimated_phase_changes = np.angle(differential_coordinates)
+        ideal_phase_changes = (
+            2.0
+            * np.pi
+            * np.arange(self.config.order, dtype=np.float64)
+            / self.config.order
+        )
+        distances = np.abs(
+            np.angle(
+                np.exp(
+                    1j
+                    * (
+                        estimated_phase_changes[:, None]
+                        - ideal_phase_changes[None, :]
+                    )
+                )
+            )
+        )
+        symbol_indices = np.argmin(distances, axis=1)
+        return self._symbol_indices_to_bits(symbol_indices)
+
+    def _demodulate_symbol_coordinate(self, samples: np.ndarray) -> complex:
+        n = self.config.samples_per_symbol
+        if len(samples) != n:
+            raise ValueError(f"Expected {n} samples, got {len(samples)}")
+
+        t = np.arange(n, dtype=np.float64) / self.config.sample_rate
+        carrier_phase = (
+            self.carrier_phase if self.config.continuous_phase else 0.0
+        )
+        phase = (
+            2.0 * np.pi * self.config.carrier_frequency * t
+            + carrier_phase
+        )
+        window = self._symbol_window(n)
+        cosine = np.dot(samples, np.cos(phase) * window)
+        sine = np.dot(samples, np.sin(phase) * window)
+
+        if self.config.continuous_phase:
+            self.carrier_phase = (
+                carrier_phase
+                + 2.0
+                * np.pi
+                * self.config.carrier_frequency
+                * n
+                / self.config.sample_rate
+            ) % (2.0 * np.pi)
+
+        return complex(sine, cosine)

@@ -100,6 +100,114 @@ class BitsToOOKAudioSamples(Stage[BitBlock, AudioSampleBlock]):
         return symbol
 
 
+class OOKAudioSamplesToBits(Stage[AudioSampleBlock, BitBlock]):
+    """Demodulate OOK symbols using a phase-independent carrier estimate."""
+
+    def __init__(self, config: OOKConfig):
+        self.config = config
+        self.sample_buffer = np.empty(0, dtype=np.float64)
+
+        if config.samples_per_symbol <= 0:
+            raise ValueError("samples_per_symbol must be positive")
+
+        if config.amplitude <= 0:
+            raise ValueError("amplitude must be positive")
+
+    async def process(
+        self,
+        stream: Stream[AudioSampleBlock],
+    ) -> Stream[BitBlock]:
+        async for block in stream:
+            samples = np.asarray(block.data, dtype=np.float64)
+            samples = np.concatenate([self.sample_buffer, samples])
+
+            n = self.config.samples_per_symbol
+            num_complete_symbols = len(samples) // n
+            num_used_samples = num_complete_symbols * n
+
+            used_samples = samples[:num_used_samples]
+            self.sample_buffer = samples[num_used_samples:]
+
+            if block.is_final and len(self.sample_buffer) > 0:
+                raise ValueError(
+                    "Final OOK audio block does not contain a whole number "
+                    "of symbols"
+                )
+
+            yield BitBlock(
+                data=self._demodulate_samples(used_samples),
+                is_final=block.is_final,
+                metadata=block.metadata,
+            )
+
+    def _demodulate_samples(self, samples: np.ndarray) -> np.ndarray:
+        if len(samples) == 0:
+            return np.empty(0, dtype=np.uint8)
+
+        n = self.config.samples_per_symbol
+
+        if len(samples) % n != 0:
+            raise ValueError(
+                "Number of samples must be divisible by symbol size"
+            )
+
+        symbols = samples.reshape(-1, n)
+        return np.fromiter(
+            (self._demodulate_symbol(symbol) for symbol in symbols),
+            dtype=np.uint8,
+            count=len(symbols),
+        )
+
+    def _demodulate_symbol(self, samples: np.ndarray) -> int:
+        estimated_amplitude = self._estimate_amplitude(samples)
+        return int(estimated_amplitude >= self.config.amplitude / 2.0)
+
+    def _estimate_amplitude(self, samples: np.ndarray) -> float:
+        n = self.config.samples_per_symbol
+
+        if len(samples) != n:
+            raise ValueError(f"Expected {n} samples, got {len(samples)}")
+
+        t = np.arange(n, dtype=np.float64) / self.config.sample_rate
+        angular_phase = (
+            2.0
+            * np.pi
+            * self.config.carrier_frequency
+            * t
+        )
+        window = self._symbol_window(n)
+        templates = np.column_stack(
+            (
+                np.sin(angular_phase) * window,
+                np.cos(angular_phase) * window,
+            )
+        )
+        coordinates, _, rank, _ = np.linalg.lstsq(
+            templates,
+            samples,
+            rcond=None,
+        )
+
+        if rank < 2:
+            raise ValueError(
+                "OOK carrier templates are not linearly independent"
+            )
+
+        return float(np.linalg.norm(coordinates))
+
+    def _symbol_window(self, n: int) -> np.ndarray:
+        window = np.ones(n, dtype=np.float64)
+        ramp = self.config.ramp_samples
+
+        if ramp > 0:
+            fade_in = np.linspace(0.0, 1.0, ramp, endpoint=False)
+            fade_out = np.linspace(1.0, 0.0, ramp, endpoint=False)
+            window[:ramp] *= fade_in
+            window[-ramp:] *= fade_out
+
+        return window
+
+
 from dataclasses import dataclass
 import math
 import numpy as np

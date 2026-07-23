@@ -46,7 +46,7 @@ from traacer.receiver.server import cert_path
 SAMPLE_RATE = 48_000
 CARRIER_FREQUENCY_HZ = 8_000.0
 SYMBOL_TIME_SECONDS = 5e-3
-MODULATION_ORDERS = (2, 4, 8, 16, 32, 64, 128, 256)
+MODULATION_ORDERS = (2,)
 
 # 840 is divisible by every bits-per-symbol value from 1 through 8. The seeded
 # generator creates one fixed, repeatable pattern with broad symbol coverage at
@@ -70,10 +70,10 @@ TRAILING_SILENCE_SECONDS = 0.5
 ASK_AMPLITUDE = 0.8
 DETECTION_THRESHOLD = 0.20
 MEASUREMENT_TIMEOUT_SECONDS = 120.0
-CSV_OUTPUT_PATH = Path("measurements/ask_order_ber.csv")
-PLOT_OUTPUT_PATH = Path("measurements/ask-order-ber.svg")
+CSV_OUTPUT_PATH = Path("measurements/ask_order_ber-2.csv")
+PLOT_OUTPUT_PATH = Path("measurements/ask-order-ber-2.svg")
 SIGNAL_SPACE_PLOT_OUTPUT_PATH = Path(
-    "measurements/ask-order-signal-space.svg"
+    "measurements/ask-phase-drift.svg"
 )
 
 
@@ -264,7 +264,7 @@ class ASKSignalSpacePlot(
         self._figure, axes = plt.subplots(
             rows,
             columns,
-            figsize=(4.0 * columns, 3.7 * rows),
+            figsize=(8.0 * columns, 7.4 * rows),
             constrained_layout=True,
             squeeze=False,
         )
