@@ -146,9 +146,6 @@ def _normalized_correlation(
             - cumulative_energy[:-len(reference)],
         )
     )
-    # FFT correlation leaves tiny numerical residuals in exact silence. Dividing
-    # those by an almost-zero window norm creates false peaks, so silent windows
-    # are explicitly kept at score zero.
     normalized = np.zeros_like(correlation, dtype=np.float64)
     non_silent = window_energy > reference_energy * 1e-12
     normalized[non_silent] = correlation[non_silent] / (

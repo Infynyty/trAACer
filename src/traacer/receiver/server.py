@@ -240,7 +240,6 @@ async def pcm_upload(websocket: WebSocket):
         pass
 
     finally:
-        print("Went to finally")
         pcm_session.upload_active = False
         pcm_session.waiting_for_device = False
         pcm_session.device_ready = False

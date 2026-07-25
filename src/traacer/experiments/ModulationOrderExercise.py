@@ -5,7 +5,7 @@ import socket
 import threading
 import time
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Callable, Literal
 
 import matplotlib.pyplot as plt
@@ -51,6 +51,7 @@ SUPPORTED_ORDERS = (2, 4, 8, 16)
 FSK_CENTER_FREQUENCY_HZ = 8_000.0
 FSK_FREQUENCY_SPACING_HZ = 2000.0
 PSK_CARRIER_FREQUENCY_HZ = 4_000.0
+PSK_PILOT_SYMBOL_INDEX = 0
 AMPLITUDE = 0.8
 
 PREAMBLE_START_FREQUENCY_HZ = 500.0
@@ -155,6 +156,7 @@ class ModulationExperimentResult:
     received_bits: np.ndarray
     bit_errors: int
     preamble_score: float
+    phase_shift_radians: float | None = None
 
     @property
     def bit_error_rate(self) -> float:
@@ -252,6 +254,18 @@ async def _modulate_fsk(bits: np.ndarray, config: FSKConfig) -> np.ndarray:
 async def _modulate_psk(bits: np.ndarray, config: PSKConfig) -> np.ndarray:
     return await _collect_audio(
         BitsToPSKAudioSamples(config).process(_single_bit_block(bits))
+    )
+
+
+def _psk_pilot_bits(config: PSKConfig) -> np.ndarray:
+    """Return the bits for the known PSK symbol prepended to every packet."""
+
+    return np.array(
+        [
+            (PSK_PILOT_SYMBOL_INDEX >> shift) & 1
+            for shift in range(config.bits_per_symbol - 1, -1, -1)
+        ],
+        dtype=np.uint8,
     )
 
 
@@ -366,6 +380,26 @@ def _psk_signal_space_coordinates(
     return coordinates
 
 
+def _estimate_psk_phase_shift(
+    samples: np.ndarray,
+    config: PSKConfig,
+) -> float:
+    """Estimate the channel's constant phase rotation from the first symbol."""
+
+    coordinates = _psk_signal_space_coordinates(samples, config)
+    if len(coordinates) == 0:
+        raise ValueError("PSK packet does not contain the pilot symbol")
+
+    pilot_coordinate = coordinates[0]
+    if abs(pilot_coordinate) <= 1e-12:
+        raise ValueError("PSK pilot has insufficient energy to estimate phase")
+
+    expected_pilot_phase = config.symbol_phases[PSK_PILOT_SYMBOL_INDEX]
+    return float(
+        np.angle(pilot_coordinate * np.exp(-1j * expected_pilot_phase))
+    )
+
+
 def _plot_fsk_signal_space(
     packet: PacketAudioSampleBlock,
     config: FSKConfig,
@@ -409,25 +443,38 @@ def _plot_fsk_signal_space(
 def _plot_psk_signal_space(
     packet: PacketAudioSampleBlock,
     config: PSKConfig,
+    phase_shift: float,
 ) -> None:
     coordinates = _psk_signal_space_coordinates(packet.data, config)
+    coordinates = coordinates * np.exp(-1j * phase_shift)
     received_level = float(np.median(np.abs(coordinates)))
     if received_level > 1e-12:
         display_coordinates = coordinates * config.amplitude / received_level
     else:
         display_coordinates = coordinates
     ideal = config.amplitude * np.exp(1j * config.symbol_phases)
-    time_position = np.arange(len(coordinates))
+    pilot_coordinate = display_coordinates[0]
+    payload_coordinates = display_coordinates[1:]
+    time_position = np.arange(len(payload_coordinates))
 
     figure, axis = plt.subplots(figsize=(7, 7), constrained_layout=True)
     scatter = axis.scatter(
-        display_coordinates.real,
-        display_coordinates.imag,
+        payload_coordinates.real,
+        payload_coordinates.imag,
         c=time_position,
         cmap="viridis",
         s=55,
         label="Received symbols",
         zorder=3,
+    )
+    axis.scatter(
+        pilot_coordinate.real,
+        pilot_coordinate.imag,
+        marker="*",
+        color="tab:red",
+        s=140,
+        label="Pilot symbol",
+        zorder=5,
     )
     axis.scatter(
         ideal.real,
@@ -458,10 +505,13 @@ def _plot_psk_signal_space(
     axis.set_aspect("equal", adjustable="box")
     axis.set_xlabel("Gain-normalized in-phase coordinate")
     axis.set_ylabel("Gain-normalized quadrature coordinate")
-    axis.set_title(f"Received {config.order}-PSK signal space")
+    axis.set_title(
+        f"Received {config.order}-PSK signal space "
+        f"(phase correction {np.degrees(phase_shift):+.1f}°)"
+    )
     axis.grid(True, alpha=0.25)
     axis.legend(loc="upper right")
-    if len(coordinates) > 1:
+    if len(payload_coordinates) > 1:
         figure.colorbar(scatter, ax=axis, label="Received symbol index")
     plt.show()
 
@@ -485,13 +535,19 @@ async def _decode_fsk_packet(
 async def _decode_psk_packet(
     packet: PacketAudioSampleBlock,
     config: PSKConfig,
+    phase_shift: float,
 ) -> np.ndarray:
     async def packet_stream() -> Stream[AudioSampleBlock]:
         yield packet
 
-    bits = PSKAudioSamplesToBits(config).process(packet_stream())
+    corrected_config = replace(
+        config,
+        phase_offset=config.phase_offset + phase_shift,
+    )
+    bits = PSKAudioSamplesToBits(corrected_config).process(packet_stream())
     async for block in bits:
-        return np.asarray(block.data, dtype=np.uint8)
+        decoded = np.asarray(block.data, dtype=np.uint8)
+        return decoded[config.bits_per_symbol:]
     raise RuntimeError("The PSK demodulator produced no bits")
 
 
@@ -540,6 +596,11 @@ def _print_result(result: ModulationExperimentResult) -> None:
     )
     print(f"Bit error rate:  {result.bit_error_rate:.3f}")
     print(f"Preamble score:  {result.preamble_score:.3f}")
+    if result.phase_shift_radians is not None:
+        print(
+            "PSK phase shift: "
+            f"{np.degrees(result.phase_shift_radians):+.1f}°"
+        )
 
 
 async def _run_experiment(
@@ -554,7 +615,10 @@ async def _run_experiment(
         payload = await _modulate_fsk(bits, config)
     else:
         config = _psk_config(order)
-        payload = await _modulate_psk(bits, config)
+        pilot_and_payload_bits = np.concatenate(
+            (_psk_pilot_bits(config), bits)
+        )
+        payload = await _modulate_psk(pilot_and_payload_bits, config)
 
     webserver = _ManagedWebserver()
     sender: WebserverDeviceLayerSenderSink | None = None
@@ -605,9 +669,15 @@ async def _run_experiment(
         if scheme == "FSK":
             received_bits = await _decode_fsk_packet(packet, config)
             _plot_fsk_signal_space(packet, config)
+            phase_shift = None
         else:
-            received_bits = await _decode_psk_packet(packet, config)
-            _plot_psk_signal_space(packet, config)
+            phase_shift = _estimate_psk_phase_shift(packet.data, config)
+            received_bits = await _decode_psk_packet(
+                packet,
+                config,
+                phase_shift,
+            )
+            _plot_psk_signal_space(packet, config, phase_shift)
 
         compared_length = min(len(bits), len(received_bits))
         bit_errors = int(
@@ -622,6 +692,7 @@ async def _run_experiment(
             received_bits=received_bits,
             bit_errors=bit_errors,
             preamble_score=packet.correlation_score,
+            phase_shift_radians=phase_shift,
         )
         _print_result(result)
         return result
