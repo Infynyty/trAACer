@@ -1,5 +1,5 @@
 [project]
-name = "trAACer"
+name = "traacer"
 authors = [
     {name = "Kasimir Stadie", email = "kstadie@ethz.ch"}
 ]
@@ -12,5 +12,10 @@ dependencies = [
     "uvicorn",
     "python-multipart",
     "av",
-    "cryptography"
+    "cryptography",
+    "websockets",
+    "qrcode[pil]",
+    "scipy",
+    "matplotlib",
+    "requests"
 ]

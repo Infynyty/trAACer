@@ -1,10 +1,11 @@
 from queue import Queue
 
-bit_queue = Queue()
+bit_send_queue = Queue()
+bit_receive_queue = Queue()
 
 def compare_bits():
-    original_bits = list(bit_queue.get())
-    received_bits = list(bit_queue.get())
+    original_bits = list(bit_send_queue.get())
+    received_bits = list(bit_receive_queue.get())
 
     if len(original_bits) != len(received_bits):
         print(f"Length mismatch: original={len(original_bits)}, received={len(received_bits)}")
